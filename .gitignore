@@ -1,0 +1,79 @@
+# ─── .NET / Visual Studio ────────────────────────────────────────────────────
+
+# User-specific files
+*.suo
+*.user
+*.DotSettings.user
+
+# Build outputs
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+bld/
+[Bb]in/
+[Oo]bj/
+artifacts/
+
+# Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.VisualState.xml
+TestResult.xml
+
+# NuGet
+*.nupkg
+**/packages/*
+!**/packages/build/
+project.lock.json
+
+# Publish artefacts
+*.pubxml
+*.publishsettings
+*.pfx
+
+# Miscellaneous generated / temp
+*.tmp
+*.tmp_proj
+*.log
+*.pdb
+*.rsp
+
+# ─── IDEs ────────────────────────────────────────────────────────────────────
+
+# Visual Studio
+.vs/
+
+# JetBrains Rider
+.idea/
+*.[Rr]e[Ss]harper
+_ReSharper*/
+
+# ─── Node / Frontend ─────────────────────────────────────────────────────────
+
+node_modules/
+vectrun/ClientApp/dist/
+*.js.map
+
+# ─── Environment / Secrets ───────────────────────────────────────────────────
+
+.env
+.env.*
+!.env.example
+*.local
+
+# ─── Claude Code ─────────────────────────────────────────────────────────────
+
+CLAUDE.md
+.claude/
+
+# ─── OS ──────────────────────────────────────────────────────────────────────
+
+~$*
+*~
+.DS_Store
+Thumbs.db
+
+vectrun_spec.md

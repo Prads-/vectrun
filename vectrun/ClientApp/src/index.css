@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
+
+:root {
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+
+.font-mono, code, pre, .mono {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+}
+
+@keyframes panel-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.panel-enter {
+  animation: panel-enter 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
