@@ -22,10 +22,8 @@ internal class BranchNode : INode
         NodeExecutionContext context,
         CancellationToken token)
     {
-        var isMatch = string.Equals(
-            context.Input,
-            _data.ExpectedOutput,
-            StringComparison.Ordinal);
+        var isMatch = string.IsNullOrEmpty(_data.ExpectedOutput)
+            || string.Equals(context.Input, _data.ExpectedOutput, StringComparison.Ordinal);
 
         return Task.FromResult(new NodeExecutionResult
         {

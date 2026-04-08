@@ -143,7 +143,7 @@ Tool executables live in the `tools/` subdirectory. Input is passed via stdin, o
 | Type | What it does |
 |---|---|
 | **agent** | Sends a request to an AI model. Runs a tool-calling loop until the model stops calling tools. |
-| **branch** | Compares input to `expectedOutput`. Routes to `trueNodeIds` or `falseNodeIds`. |
+| **branch** | Compares input to `expectedOutput` (optional). Routes to `trueNodeIds` on match, `falseNodeIds` on mismatch. If `expectedOutput` is omitted, always routes to `trueNodeIds`. |
 | **logic** | Runs an external process (`logicType: "process"`) or an embedded Lua script (`logicType: "script"`). Input via stdin, output from stdout or return value. |
 | **wait** | Sleeps for `durationMs` milliseconds, then passes input through unchanged. |
 
@@ -182,9 +182,48 @@ Two built-in tools are available to every agent — no configuration needed:
 
 These names are reserved and cannot be used for user-defined tools. The intended polling pattern is **WaitNode → AgentNode → BranchNode** (loop back if queue is empty).
 
+## Bundled tools
+
+The `tools/` directory contains ready-made executables you can reference in `tools.json`.
+
+### web-scraper
+
+Fetches the fully-rendered HTML of a URL (JavaScript executed) and writes it to stdout.
+
+```
+web-scraper <url>
+```
+
+Uses a headless Chromium browser via Playwright. Waits for network idle before capturing.
+
+### kv-store
+
+A lightweight, disk-backed key-value store. Data is written to `data/<namespace>/<key-hash>` files next to the executable, so it persists across pipeline runs without any external service.
+
+```
+kv-store write  <namespace> <key> <value>   # create (fails if key exists)
+kv-store update <namespace> <key> <value>   # overwrite (fails if key absent)
+kv-store read   <namespace> <key>           # print value to stdout
+kv-store delete <namespace> <key>           # remove entry
+```
+
+Namespaces keep agents isolated — each agent can read and write its own namespace without colliding with others. Keys are hashed (SHA-256) so any string is a valid key.
+
+### scaffold-claude
+
+Reads project requirements from stdin, scaffolds a `CLAUDE.md` in a new project directory, then launches Claude Code non-interactively to build the project. Claude's output is streamed to stdout so it flows through the pipeline.
+
+```
+scaffold-claude <project-directory>
+```
+
+The requirements text is read from stdin (piped from a previous node). Claude Code must be installed and available in `PATH`. The project directory is created if it does not exist.
+
+**Example pipeline use:** an agent node summarises or refines raw requirements → `scaffold-claude` scaffolds and builds the project → a downstream node reads the build summary.
+
 ## State management
 
-The runtime owns no persistent storage beyond the in-memory message queues. All other state — shared or agent-scoped — is handled via external tools. Choose whatever backend fits your pipeline (SQLite, Redis, a vector DB, plain files).
+The runtime owns no persistent storage beyond the in-memory message queues. All other state — shared or agent-scoped — is handled via external tools. The bundled `kv-store` tool covers simple key-value needs; swap it for SQLite, Redis, a vector DB, or plain files as your pipeline demands.
 
 ## Development
 
