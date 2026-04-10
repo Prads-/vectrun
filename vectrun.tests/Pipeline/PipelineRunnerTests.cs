@@ -211,6 +211,70 @@ public class PipelineRunnerTests
         Assert.All(entries, e => Assert.True(e.Timestamp >= before));
     }
 
+    // ── Branch failure ────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunAsync_NodeThrows_EmitsBranchFailedLogEntry()
+    {
+        var node = Substitute.For<INode>();
+        node.Id.Returns("a");
+        node.Type.Returns("agent");
+        node.Name.Returns((string?)null);
+        node.ExecuteAsync(Arg.Any<NodeExecutionContext>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<NodeExecutionResult>(new InvalidOperationException("boom")));
+
+        var entries = await CollectLogs(Pipeline("a", node));
+
+        Assert.Single(entries, e => e.Event == "branch_failed" && e.Message!.Contains("boom"));
+    }
+
+    [Fact]
+    public async Task RunAsync_NodeThrows_DoesNotPropagateException()
+    {
+        var node = Substitute.For<INode>();
+        node.Id.Returns("a");
+        node.Type.Returns("agent");
+        node.Name.Returns((string?)null);
+        node.ExecuteAsync(Arg.Any<NodeExecutionContext>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<NodeExecutionResult>(new InvalidOperationException("fail")));
+
+        await PipelineRunner.RunAsync(Pipeline("a", node));
+    }
+
+    [Fact]
+    public async Task RunAsync_NodeThrows_DoesNotEmitOutputEvent()
+    {
+        var node = Substitute.For<INode>();
+        node.Id.Returns("a");
+        node.Type.Returns("agent");
+        node.Name.Returns((string?)null);
+        node.ExecuteAsync(Arg.Any<NodeExecutionContext>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<NodeExecutionResult>(new InvalidOperationException("fail")));
+
+        var entries = await CollectLogs(Pipeline("a", node));
+
+        Assert.DoesNotContain(entries, e => e.Event == "output");
+    }
+
+    [Fact]
+    public async Task RunAsync_OneOfTwoBranchesThrows_OtherBranchStillExecutes()
+    {
+        var nodeA = MockNode("a", "out", ["b", "c"]);
+
+        var nodeB = Substitute.For<INode>();
+        nodeB.Id.Returns("b");
+        nodeB.Type.Returns("agent");
+        nodeB.Name.Returns((string?)null);
+        nodeB.ExecuteAsync(Arg.Any<NodeExecutionContext>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<NodeExecutionResult>(new InvalidOperationException("b failed")));
+
+        var nodeC = MockNode("c", null, []);
+
+        await PipelineRunner.RunAsync(Pipeline("a", nodeA, nodeB, nodeC));
+
+        await nodeC.Received(1).ExecuteAsync(Arg.Any<NodeExecutionContext>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task RunAsync_NullLog_DoesNotThrow()
     {

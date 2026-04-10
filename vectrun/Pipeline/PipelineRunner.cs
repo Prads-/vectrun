@@ -25,8 +25,19 @@ internal static class PipelineRunner
         log?.TryWrite(new PipelineLogEntry(
             DateTimeOffset.UtcNow, node.Id, node.Type, node.Name, "started", input));
 
-        var result = await node.ExecuteAsync(
-            new NodeExecutionContext { Input = input, Log = log }, token);
+        NodeExecutionResult result;
+
+        try
+        {
+            result = await node.ExecuteAsync(
+                new NodeExecutionContext { Input = input, Log = log }, token);
+        }
+        catch (Exception ex)
+        {
+            log?.TryWrite(new PipelineLogEntry(
+                DateTimeOffset.UtcNow, node.Id, node.Type, node.Name, "branch_failed", ex.Message));
+            return;
+        }
 
         log?.TryWrite(new PipelineLogEntry(
             DateTimeOffset.UtcNow, node.Id, node.Type, node.Name, "output", result.Output));

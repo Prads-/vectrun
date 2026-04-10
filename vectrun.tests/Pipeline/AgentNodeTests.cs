@@ -15,8 +15,9 @@ public class AgentNodeTests
         IAIClient client,
         IEnumerable<IToolDefinition>? tools = null,
         IEnumerable<IToolDefinition>? builtInTools = null,
-        string? name = null) =>
-        new("1", new AgentNodeData { AgentId = "agent1", Name = name, NextNodeIds = ["next"] }, client, tools ?? [], builtInTools);
+        string? name = null,
+        RetryPolicy? retry = null) =>
+        new("1", new AgentNodeData { AgentId = "agent1", Name = name, NextNodeIds = ["next"], Retry = retry }, client, tools ?? [], builtInTools);
 
     private static IAIClient ClientReturning(string content)
     {
@@ -231,6 +232,114 @@ public class AgentNodeTests
             entries.Add(e);
 
         Assert.DoesNotContain(entries, e => e.Event is "tool_call" or "tool_result");
+    }
+
+    // ── Retry ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_WithRetry_ClientThrowsOnceThenSucceeds_ReturnsResult()
+    {
+        var callCount = 0;
+        var client = Substitute.For<IAIClient>();
+        client.SendAsync(Arg.Any<AIChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                if (callCount++ == 0)
+                    return Task.FromException<AIChatResponse>(new InvalidOperationException("transient"));
+                return Task.FromResult(new AIChatResponse
+                {
+                    Message = new AIMessage { Role = "assistant", Content = "recovered" }
+                });
+            });
+
+        var result = await Node(client, retry: new RetryPolicy { RetryCount = 1, RetryDelayMs = 0, DelayType = "linear" })
+            .ExecuteAsync(new NodeExecutionContext { Input = "hi" }, default);
+
+        Assert.Equal("recovered", result.Output);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithRetry_AllRetriesExhausted_Throws()
+    {
+        var client = Substitute.For<IAIClient>();
+        client.SendAsync(Arg.Any<AIChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<AIChatResponse>(new InvalidOperationException("always fails")));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Node(client, retry: new RetryPolicy { RetryCount = 2, RetryDelayMs = 0, DelayType = "linear" })
+                .ExecuteAsync(new NodeExecutionContext { Input = "hi" }, default));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithRetry_EmitsRetryLogEntries()
+    {
+        var callCount = 0;
+        var client = Substitute.For<IAIClient>();
+        client.SendAsync(Arg.Any<AIChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                if (callCount++ < 2)
+                    return Task.FromException<AIChatResponse>(new InvalidOperationException("fail"));
+                return Task.FromResult(new AIChatResponse
+                {
+                    Message = new AIMessage { Role = "assistant", Content = "ok" }
+                });
+            });
+
+        var channel = Channel.CreateUnbounded<PipelineLogEntry>();
+        await Node(client, retry: new RetryPolicy { RetryCount = 2, RetryDelayMs = 0, DelayType = "linear" })
+            .ExecuteAsync(new NodeExecutionContext { Input = "hi", Log = channel.Writer }, default);
+        channel.Writer.Complete();
+
+        var entries = new List<PipelineLogEntry>();
+        await foreach (var e in channel.Reader.ReadAllAsync())
+            entries.Add(e);
+
+        Assert.Equal(2, entries.Count(e => e.Event == "retry"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WithRetry_RetriesExhausted_EmitsFailedLogEntry()
+    {
+        var client = Substitute.For<IAIClient>();
+        client.SendAsync(Arg.Any<AIChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<AIChatResponse>(new InvalidOperationException("boom")));
+
+        var channel = Channel.CreateUnbounded<PipelineLogEntry>();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Node(client, retry: new RetryPolicy { RetryCount = 1, RetryDelayMs = 0, DelayType = "linear" })
+                .ExecuteAsync(new NodeExecutionContext { Input = "hi", Log = channel.Writer }, default));
+
+        channel.Writer.Complete();
+
+        var entries = new List<PipelineLogEntry>();
+        await foreach (var e in channel.Reader.ReadAllAsync())
+            entries.Add(e);
+
+        Assert.Single(entries, e => e.Event == "failed" && e.Message!.Contains("boom"));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoRetryConfigured_ClientThrows_DoesNotEmitRetryOrFailedEvents()
+    {
+        var client = Substitute.For<IAIClient>();
+        client.SendAsync(Arg.Any<AIChatRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Task.FromException<AIChatResponse>(new InvalidOperationException("fail")));
+
+        var channel = Channel.CreateUnbounded<PipelineLogEntry>();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Node(client)
+                .ExecuteAsync(new NodeExecutionContext { Input = "hi", Log = channel.Writer }, default));
+
+        channel.Writer.Complete();
+
+        var entries = new List<PipelineLogEntry>();
+        await foreach (var e in channel.Reader.ReadAllAsync())
+            entries.Add(e);
+
+        Assert.DoesNotContain(entries, e => e.Event is "retry" or "failed");
     }
 
     [Fact]

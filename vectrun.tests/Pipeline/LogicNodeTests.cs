@@ -1,13 +1,14 @@
 namespace vectrun.tests.Pipeline;
 
+using System.Threading.Channels;
 using vectrun.Models;
 using vectrun.Pipeline;
 using vectrun.Pipeline.Models;
 
 public class LogicNodeTests
 {
-    private static LogicNode ScriptNode(string script, List<string>? nextNodeIds = null) =>
-        new("1", new LogicNodeData { LogicType = "script", Script = script, NextNodeIds = nextNodeIds ?? [] });
+    private static LogicNode ScriptNode(string script, List<string>? nextNodeIds = null, RetryPolicy? retry = null) =>
+        new("1", new LogicNodeData { LogicType = "script", Script = script, NextNodeIds = nextNodeIds ?? [], Retry = retry });
 
     [Fact]
     public async Task ExecuteAsync_Script_ReturnsLuaResult()
@@ -77,5 +78,61 @@ public class LogicNodeTests
     {
         var node = new LogicNode("1", new LogicNodeData { LogicType = "script", Script = "return 'x'" });
         Assert.Null(node.Name);
+    }
+
+    // ── Retry ─────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_Script_WithRetry_AllRetriesExhausted_Throws()
+    {
+        var node = ScriptNode(
+            "local a = nil; return a.x",
+            retry: new RetryPolicy { RetryCount = 2, RetryDelayMs = 0, DelayType = "linear" });
+
+        var threw = false;
+        try { await node.ExecuteAsync(new NodeExecutionContext { Input = null }, default); }
+        catch { threw = true; }
+        Assert.True(threw);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Script_WithRetry_EmitsRetryAndFailedLogEntries()
+    {
+        var node = ScriptNode(
+            "local a = nil; return a.x",
+            retry: new RetryPolicy { RetryCount = 2, RetryDelayMs = 0, DelayType = "linear" });
+
+        var channel = Channel.CreateUnbounded<PipelineLogEntry>();
+
+        try { await node.ExecuteAsync(new NodeExecutionContext { Input = null, Log = channel.Writer }, default); }
+        catch { /* expected */ }
+
+        channel.Writer.Complete();
+
+        var entries = new List<PipelineLogEntry>();
+        await foreach (var e in channel.Reader.ReadAllAsync())
+            entries.Add(e);
+
+        Assert.Equal(2, entries.Count(e => e.Event == "retry"));
+        Assert.Single(entries, e => e.Event == "failed");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Script_NoRetryConfigured_Throws_EmitsNoRetryOrFailedEvents()
+    {
+        var node = ScriptNode("local a = nil; return a.x");
+
+        var channel = Channel.CreateUnbounded<PipelineLogEntry>();
+
+        try { await node.ExecuteAsync(new NodeExecutionContext { Input = null, Log = channel.Writer }, default); }
+        catch { /* expected */ }
+
+        channel.Writer.Complete();
+
+        var entries = new List<PipelineLogEntry>();
+        await foreach (var e in channel.Reader.ReadAllAsync())
+            entries.Add(e);
+
+        Assert.DoesNotContain(entries, e => e.Event is "retry" or "failed");
     }
 }

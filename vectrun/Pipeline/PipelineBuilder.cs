@@ -108,7 +108,8 @@ internal static class PipelineBuilder
             Name = data.Name,
             AgentId = data.AgentId,
             NextNodeIds = data.NextNodeIds,
-            ToolIds = toolIds
+            ToolIds = toolIds,
+            Retry = data.Retry
         };
 
         return new AgentNode(id, resolvedData, CreateClient(modelConfig), resolvedTools, builtInTools, agentConfig);

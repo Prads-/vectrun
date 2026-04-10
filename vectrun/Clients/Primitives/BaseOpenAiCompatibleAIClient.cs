@@ -30,7 +30,7 @@ internal abstract class BaseOpenAiCompatibleAIClient : BaseAIClient
                     type = "function",
                     function = new { name = tc.Name, arguments = tc.Arguments }
                 })
-            }).ToList(),
+            }),
             ["tools"] = request.Tools?.Select(t => new
             {
                 type = "function",
@@ -40,7 +40,7 @@ internal abstract class BaseOpenAiCompatibleAIClient : BaseAIClient
                     description = t.Description,
                     parameters = t.Parameters
                 }
-            }).ToList()
+            })
         };
 
         if (request.ResponseFormat is not null)

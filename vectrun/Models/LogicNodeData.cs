@@ -1,8 +1,7 @@
-﻿namespace vectrun.Models;
+namespace vectrun.Models;
 
-internal class LogicNodeData
+internal class LogicNodeData : NodeData
 {
-    public string? Name { get; set; }
     public required string LogicType { get; set; } // "process" or "script"
     public List<string> NextNodeIds { get; set; } = new();
 

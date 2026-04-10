@@ -1,5 +1,5 @@
 import type { AnyFlowNode } from '../../lib/layoutGraph'
-import type { AnyNodeData, AgentNodeData, BranchNodeData, LogicNodeData, WaitNodeData } from '../../types/pipeline'
+import type { AnyNodeData, AgentNodeData, BranchNodeData, LogicNodeData, WaitNodeData, RetryPolicy } from '../../types/pipeline'
 import type { AgentConfig } from '../../types/workspace'
 
 interface Props {
@@ -163,6 +163,10 @@ function AgentForm({ data, agents, onChange }: {
           Model: <span className="font-semibold">{matchedAgent.modelId}</span>
         </div>
       )}
+      <RetryPolicyForm
+        policy={data.retry}
+        onChange={policy => onChange({ ...data, retry: policy })}
+      />
     </div>
   )
 }
@@ -224,6 +228,10 @@ function LogicForm({ data, onChange }: {
           />
         </label>
       )}
+      <RetryPolicyForm
+        policy={data.retry}
+        onChange={policy => onChange({ ...data, retry: policy })}
+      />
     </div>
   )
 }
@@ -243,6 +251,60 @@ function WaitForm({ data, onChange }: {
           className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
         />
       </label>
+    </div>
+  )
+}
+
+function RetryPolicyForm({ policy, onChange }: {
+  policy: RetryPolicy | undefined
+  onChange: (policy: RetryPolicy | undefined) => void
+}) {
+  const retryCount = policy?.retryCount ?? 0
+  const retryDelayMs = policy?.retryDelayMs ?? 0
+  const delayType = policy?.delayType ?? 'linear'
+
+  function update(count: number, delayMs: number, type: string) {
+    onChange(count === 0 ? undefined : { retryCount: count, retryDelayMs: delayMs, delayType: type })
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-slate-100 pt-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Retry Policy</p>
+      <label className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-slate-500">Retries</span>
+        <input
+          type="number"
+          min={0}
+          value={retryCount}
+          onChange={e => update(Number(e.target.value), retryDelayMs, delayType)}
+          className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+        />
+      </label>
+      {retryCount > 0 && (
+        <>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-500">Delay (ms)</span>
+            <input
+              type="number"
+              min={0}
+              value={retryDelayMs}
+              onChange={e => update(retryCount, Number(e.target.value), delayType)}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-500">Delay type</span>
+            <select
+              value={delayType}
+              onChange={e => update(retryCount, retryDelayMs, e.target.value)}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="linear">linear</option>
+              <option value="sliding">sliding</option>
+            </select>
+          </label>
+        </>
+      )}
     </div>
   )
 }

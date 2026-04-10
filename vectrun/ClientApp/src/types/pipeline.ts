@@ -1,10 +1,17 @@
 export type NodeType = 'agent' | 'branch' | 'logic' | 'wait'
 
+export interface RetryPolicy {
+  retryCount: number
+  retryDelayMs: number
+  delayType: string  // "linear" | "sliding"
+}
+
 export interface AgentNodeData extends Record<string, unknown> {
   name?: string
   agentId: string
   nextNodeIds?: string[]
   toolIds?: string[]
+  retry?: RetryPolicy
 }
 
 export interface BranchNodeData extends Record<string, unknown> {
@@ -20,6 +27,7 @@ export interface LogicNodeData extends Record<string, unknown> {
   script?: string
   processPath?: string
   nextNodeIds?: string[]
+  retry?: RetryPolicy
 }
 
 export interface WaitNodeData extends Record<string, unknown> {

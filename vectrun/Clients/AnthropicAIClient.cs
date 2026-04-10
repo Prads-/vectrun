@@ -31,7 +31,7 @@ internal class AnthropicAIClient : BaseAIClient
                 name = t.Name,
                 description = t.Description,
                 input_schema = t.Parameters
-            }).ToList();
+            });
 
         if (request.ResponseFormat?.Type == "json")
         {
@@ -124,7 +124,7 @@ internal class AnthropicAIClient : BaseAIClient
                         id = tc.Id,
                         name = tc.Name,
                         input = JsonSerializer.Deserialize<JsonElement>(tc.Arguments)
-                    }).ToList()
+                    })
                 });
                 i++;
             }

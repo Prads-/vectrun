@@ -30,16 +30,16 @@ internal class OllamaAIClient : BaseAIClient
                         tool_calls = m.ToolCalls.Select(tc => new
                         {
                             function = new { name = tc.Name, arguments = tc.Arguments }
-                        }).ToList()
+                        })
                     };
 
                 return new { role = m.Role, content = m.Content };
-            }).ToList(),
+            }),
             ["tools"] = request.Tools?.Select(t => new
             {
                 type = "function",
                 function = new { name = t.Name, description = t.Description, parameters = t.Parameters }
-            }).ToList()
+            })
         };
 
         if (request.ResponseFormat?.Type == "json")

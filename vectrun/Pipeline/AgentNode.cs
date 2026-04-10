@@ -8,9 +8,8 @@ using vectrun.Pipeline.Contracts;
 using vectrun.Pipeline.Models;
 using PipelineLogEntry = vectrun.Models.PipelineLogEntry;
 
-internal class AgentNode : INode
+internal class AgentNode : BaseNode<AgentNodeData>
 {
-    private readonly AgentNodeData _data;
     private readonly IAIClient _aiClient;
     private readonly Dictionary<string, IToolDefinition> _tools;
     private readonly List<IToolDefinition> _builtInTools;
@@ -23,20 +22,15 @@ internal class AgentNode : INode
         IEnumerable<IToolDefinition> tools,
         IEnumerable<IToolDefinition>? builtInTools = null,
         AgentConfig? agentConfig = null)
+        : base(id, "agent", data)
     {
-        Id = id;
-        _data = data;
         _aiClient = aiClient;
         _agentConfig = agentConfig;
         _builtInTools = builtInTools?.ToList() ?? [];
         _tools = tools.Concat(_builtInTools).ToDictionary(s => s.Name);
     }
 
-    public string Id { get; }
-    public string Type => "agent";
-    public string? Name => _data.Name;
-
-    public async Task<NodeExecutionResult> ExecuteAsync(
+    protected override async Task<NodeExecutionResult> ExecuteCoreAsync(
         NodeExecutionContext context,
         CancellationToken token)
     {
@@ -65,7 +59,6 @@ internal class AgentNode : INode
         {
             var response = await _aiClient.SendAsync(request, token);
 
-            // Add assistant message
             request.Messages.Add(response.Message);
 
             if (response.ToolCalls == null || response.ToolCalls.Count == 0)
@@ -73,11 +66,10 @@ internal class AgentNode : INode
                 return new NodeExecutionResult
                 {
                     Output = response.Message.Content,
-                    NextNodeIds = _data.NextNodeIds
+                    NextNodeIds = Data.NextNodeIds
                 };
             }
 
-            // Execute tool calls
             foreach (var toolCall in response.ToolCalls)
             {
                 context.Log?.TryWrite(new PipelineLogEntry(
@@ -102,16 +94,23 @@ internal class AgentNode : INode
 
     private List<AITool>? ResolveTools()
     {
-        var userTools = _data.ToolIds?.Select(id => _tools[id].ToAITool()) ?? [];
-        var all = userTools.Concat(_builtInTools.Select(t => t.ToAITool())).ToList();
+        var userTools = Data
+            .ToolIds?
+            .Select(id => _tools[id].ToAITool())
+            ?? [];
+
+        var all = userTools
+            .Concat(_builtInTools.Select(t => t.ToAITool()))
+            .ToList();
+
         return all.Count > 0 ? all : null;
     }
 
-    private async Task<string> ExecuteTool(AIToolCall call, CancellationToken token)
+    private Task<string> ExecuteTool(AIToolCall call, CancellationToken token)
     {
         if (!_tools.TryGetValue(call.Name, out var tool))
             throw new InvalidOperationException($"Tool not found: {call.Name}");
 
-        return await tool.ExecuteAsync(call.Arguments, token);
+        return tool.ExecuteAsync(call.Arguments, token);
     }
 }

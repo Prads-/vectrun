@@ -144,10 +144,42 @@ Tool executables live in the `tools/` subdirectory. Input is passed via stdin, o
 |---|---|
 | **agent** | Sends a request to an AI model. Runs a tool-calling loop until the model stops calling tools. |
 | **branch** | Compares input to `expectedOutput` (optional). Routes to `trueNodeIds` on match, `falseNodeIds` on mismatch. If `expectedOutput` is omitted, always routes to `trueNodeIds`. |
-| **logic** | Runs an external process (`logicType: "process"`) or an embedded Lua script (`logicType: "script"`). Input via stdin, output from stdout or return value. |
+| **logic** | Runs an external process (`logicType: "process"`) or an embedded Lua script (`logicType: "script"`). Input via stdin, output from stdout or return value. A process fails if it exits with a non-zero code or writes anything to stderr. |
 | **wait** | Sleeps for `durationMs` milliseconds, then passes input through unchanged. |
 
 All node types support an optional `name` field for human-readable labelling.
+
+## Retry policy
+
+Agent and Logic nodes support an optional retry policy. When a node fails it is retried up to `retryCount` times before the branch stops.
+
+```json
+{
+  "id": "call-api",
+  "type": "agent",
+  "data": {
+    "agentId": "my-agent",
+    "nextNodeIds": ["next"],
+    "retry": {
+      "retryCount": 3,
+      "retryDelayMs": 1000,
+      "delayType": "sliding"
+    }
+  }
+}
+```
+
+| Field | Description |
+|---|---|
+| `retryCount` | Number of retries after the initial attempt. `0` or absent disables retries. |
+| `retryDelayMs` | Base delay in milliseconds between attempts. |
+| `delayType` | `"linear"` — same delay every time. `"sliding"` — delay doubles each attempt (1 s → 2 s → 4 s …). |
+
+Retry policy is configured per-node in the web editor under the **Retry Policy** section of the node properties panel.
+
+## Error handling
+
+When a node exhausts all retries the branch it belongs to stops. Other parallel branches are unaffected and continue to completion. The pipeline itself only finishes once every branch has either completed or stopped.
 
 ## Web UI
 
@@ -169,7 +201,9 @@ Clicking **Run** streams log entries in real time to a collapsible output panel 
 | `output` | A node completes and emits its result |
 | `tool_call` | An agent node invokes a tool |
 | `tool_result` | The tool returns a result |
-| `error` | An error occurred |
+| `retry` | A node failed and is being retried (includes attempt number and error) |
+| `failed` | A node has exhausted all retries |
+| `branch_failed` | A branch stopped due to an unrecoverable node failure |
 
 Entries can be filtered by node using the dropdown in the panel header.
 
