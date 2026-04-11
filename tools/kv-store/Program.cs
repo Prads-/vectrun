@@ -110,8 +110,8 @@ static int Delete(string keyFile)
 {
     if (!File.Exists(keyFile))
     {
-        Console.Error.WriteLine("Key not found.");
-        return 1;
+        Console.WriteLine("OK");
+        return 0;
     }
 
     try
