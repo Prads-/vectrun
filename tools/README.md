@@ -7,11 +7,12 @@ Standalone .NET 9 executables used as tools within vectrun pipelines. Each tool 
 Build all tools from the repo root:
 
 ```bash
-dotnet build tools/web-scraper/web-scraper.csproj     -c Release
-dotnet build tools/kv-store/kv-store.csproj           -c Release
-dotnet build tools/scaffold-claude/scaffold-claude.csproj -c Release
-dotnet build tools/file-manager/file-manager.csproj   -c Release
-dotnet build tools/image-generator/image-generator.csproj -c Release
+dotnet build tools/web-scraper/web-scraper.csproj         -c Release
+dotnet build tools/kv-store/kv-store.csproj               -c Release
+dotnet build tools/scaffold-claude/scaffold-claude.csproj  -c Release
+dotnet build tools/file-manager/file-manager.csproj        -c Release
+dotnet build tools/image-generator/image-generator.csproj  -c Release
+dotnet build tools/ollama-stop/ollama-stop.csproj          -c Release
 ```
 
 Binaries are written to each tool's `bin/Release/net9.0/` directory.
@@ -20,7 +21,7 @@ Binaries are written to each tool's `bin/Release/net9.0/` directory.
 
 ## web-scraper
 
-Fetches the full HTML content of a web page using a headless Chromium browser (Playwright). Waits for network idle so JavaScript-rendered content is included.
+Fetches the full HTML content of a web page using a headless Chromium browser (Playwright). Waits for the page `load` event, then attempts a further 25-second network-idle wait (best-effort) so JavaScript-rendered content is included without hanging on analytics-heavy sites.
 
 ### CLI
 
@@ -71,12 +72,12 @@ kv-store <read|write|update|delete> <namespace> <key> [value]
 
 ### Operations
 
-| Operation | Behaviour                                              |
-|-----------|--------------------------------------------------------|
-| `write`   | Creates a new key. Fails if the key already exists.    |
-| `read`    | Returns the stored value. Fails if key does not exist. |
-| `update`  | Overwrites an existing key. Fails if key does not exist. |
-| `delete`  | Removes the key. Fails if key does not exist.          |
+| Operation | Behaviour                                                        |
+|-----------|------------------------------------------------------------------|
+| `write`   | Creates or overwrites a key (upsert).                            |
+| `read`    | Returns the stored value. Fails if key does not exist.           |
+| `update`  | Overwrites an existing key. Fails if key does not exist.         |
+| `delete`  | Removes the key. Succeeds silently if the key does not exist.    |
 
 ### Output
 
@@ -213,4 +214,33 @@ Generates an image via a locally running **ComfyUI** instance and saves it to di
 
 - The tool polls ComfyUI every 2 seconds until the job completes.
 - HTTP client timeout is 10 minutes to accommodate slow generations.
+- After saving the image, `POST /free` (`unload_models: true, free_memory: true`) is called automatically to release VRAM. This is best-effort and does not affect the tool's exit code.
 - The `checkpoint` field is useful when you want different models for different asset categories (e.g. a pixel art LoRA for sprites, a different model for cinematic backgrounds).
+
+---
+
+## ollama-stop
+
+Stops a running Ollama model, releasing it from VRAM. Wraps `ollama stop <model>`.
+
+**Requires:** `ollama` installed and available in PATH.
+
+### CLI
+
+```bash
+ollama-stop <model>
+```
+
+### Pipeline (stdin JSON)
+
+```json
+{ "model": "llama3" }
+```
+
+| Field   | Required | Description              |
+|---------|----------|--------------------------|
+| `model` | Yes      | Name of the model to stop |
+
+### Output
+
+`OK` on success (or ollama's own output if non-empty). stderr + non-zero exit on failure.
