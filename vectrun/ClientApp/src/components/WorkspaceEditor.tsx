@@ -285,7 +285,6 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
         agents={agents}
         onAgentsChange={setAgents}
         onAgentsSave={handleSaveAgents}
-        directory={directory}
         isRunning={isRunning}
         onRun={handleRun}
         saveStatus={saveStatus}

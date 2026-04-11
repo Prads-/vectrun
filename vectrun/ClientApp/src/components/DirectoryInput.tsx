@@ -8,6 +8,30 @@ interface Props {
   onSubmit: () => void
 }
 
+const STORAGE_KEY = 'vectrun_recent_pipelines'
+const MAX_RECENTS = 5
+
+function loadRecents(): string[] {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') }
+  catch { return [] }
+}
+
+function persistRecents(recents: string[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(recents))
+}
+
+function addRecent(path: string): string[] {
+  const updated = [path, ...loadRecents().filter(r => r !== path)].slice(0, MAX_RECENTS)
+  persistRecents(updated)
+  return updated
+}
+
+function removeRecent(path: string): string[] {
+  const updated = loadRecents().filter(r => r !== path)
+  persistRecents(updated)
+  return updated
+}
+
 export function DirectoryInput({ value, onChange, onSubmit }: Props) {
   const [open, setOpen] = useState(false)
   const [current, setCurrent] = useState<string | null>(null)
@@ -15,6 +39,7 @@ export function DirectoryInput({ value, onChange, onSubmit }: Props) {
   const [entries, setEntries] = useState<BrowseEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [recents, setRecents] = useState<string[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async (path?: string) => {
@@ -33,6 +58,7 @@ export function DirectoryInput({ value, onChange, onSubmit }: Props) {
   }, [])
 
   function openBrowser() {
+    setRecents(loadRecents())
     setOpen(true)
     load(value || undefined)
   }
@@ -43,7 +69,19 @@ export function DirectoryInput({ value, onChange, onSubmit }: Props) {
 
   function select(path: string) {
     onChange(path)
+    setRecents(addRecent(path))
     setOpen(false)
+  }
+
+  function handleSubmit() {
+    if (value.trim()) setRecents(addRecent(value.trim()))
+    setOpen(false)
+    onSubmit()
+  }
+
+  function handleRemoveRecent(e: React.MouseEvent, path: string) {
+    e.stopPropagation()
+    setRecents(removeRecent(path))
   }
 
   // Close on outside click
@@ -65,7 +103,7 @@ export function DirectoryInput({ value, onChange, onSubmit }: Props) {
         onChange={(e) => onChange(e.target.value)}
         onFocus={openBrowser}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') { setOpen(false); onSubmit() }
+          if (e.key === 'Enter') handleSubmit()
           if (e.key === 'Escape') setOpen(false)
         }}
         placeholder="Pipeline directory path…"
@@ -74,11 +112,38 @@ export function DirectoryInput({ value, onChange, onSubmit }: Props) {
 
       {open && (
         <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-xl border border-slate-200 bg-white shadow-xl overflow-hidden">
+
+          {/* Recent paths */}
+          {recents.length > 0 && (
+            <div className="border-b border-slate-100">
+              <p className="px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Recent</p>
+              <ul className="py-1">
+                {recents.map(path => (
+                  <li key={path}>
+                    <button
+                      onClick={() => select(path)}
+                      className="group flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-700"
+                    >
+                      <ClockIcon className="shrink-0 text-slate-400 group-hover:text-blue-400" />
+                      <span className="truncate font-mono text-xs">{path}</span>
+                      <span
+                        role="button"
+                        onClick={(e) => handleRemoveRecent(e, path)}
+                        className="ml-auto shrink-0 rounded p-0.5 text-slate-300 hover:bg-slate-100 hover:text-slate-500"
+                        title="Remove from recents"
+                      >
+                        <XIcon />
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {/* Breadcrumb */}
           <div className="flex items-center gap-1 border-b border-slate-100 px-3 py-2 bg-slate-50">
-            {loading && (
-              <span className="text-xs text-slate-400">Loading…</span>
-            )}
+            {loading && <span className="text-xs text-slate-400">Loading…</span>}
             {!loading && current && (
               <span className="text-xs font-mono text-slate-500 truncate">{current}</span>
             )}
@@ -93,9 +158,7 @@ export function DirectoryInput({ value, onChange, onSubmit }: Props) {
           </div>
 
           {/* Error */}
-          {error && (
-            <div className="px-3 py-2 text-xs text-red-600">{error}</div>
-          )}
+          {error && <div className="px-3 py-2 text-xs text-red-600">{error}</div>}
 
           {/* Entries */}
           {!loading && (
@@ -137,6 +200,22 @@ function FolderIcon({ className }: { className?: string }) {
   return (
     <svg className={`h-4 w-4 ${className ?? ''}`} viewBox="0 0 20 20" fill="currentColor">
       <path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+    </svg>
+  )
+}
+
+function ClockIcon({ className }: { className?: string }) {
+  return (
+    <svg className={`h-4 w-4 ${className ?? ''}`} viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+    </svg>
+  )
+}
+
+function XIcon() {
+  return (
+    <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
     </svg>
   )
 }

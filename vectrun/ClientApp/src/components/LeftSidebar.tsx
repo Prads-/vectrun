@@ -52,7 +52,6 @@ interface Props {
   onAgentsChange: (a: AgentConfig[]) => void
   onAgentsSave: (a: AgentConfig[]) => void
   // run / save
-  directory: string
   isRunning: boolean
   onRun: (input: string) => void
   saveStatus: 'idle' | 'saving' | 'saved' | 'error'
@@ -67,7 +66,7 @@ export function LeftSidebar({
   models, onModelsChange, onModelsSave,
   tools, onToolsChange, onToolsSave,
   agents, onAgentsChange, onAgentsSave,
-  directory, isRunning, onRun, saveStatus, saveError, onSave,
+  isRunning, onRun, saveStatus, saveError, onSave,
 }: Props) {
   function toggle(s: SidebarSection) {
     onSectionChange(activeSection === s ? null : s)
