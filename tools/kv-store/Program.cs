@@ -54,8 +54,8 @@ static int Read(string keyFile)
 {
     if (!File.Exists(keyFile))
     {
-        Console.Error.WriteLine("Key not found.");
-        return 1;
+        // Return empty string with exit 0 — callers should treat empty as "not found"
+        return 0;
     }
 
     try

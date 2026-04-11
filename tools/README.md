@@ -75,7 +75,7 @@ kv-store <read|write|update|delete> <namespace> <key> [value]
 | Operation | Behaviour                                                        |
 |-----------|------------------------------------------------------------------|
 | `write`   | Creates or overwrites a key (upsert).                            |
-| `read`    | Returns the stored value. Fails if key does not exist.           |
+| `read`    | Returns the stored value. Returns empty string (exit 0) if key does not exist. |
 | `update`  | Overwrites an existing key. Fails if key does not exist.         |
 | `delete`  | Removes the key. Succeeds silently if the key does not exist.    |
 
