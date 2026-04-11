@@ -134,7 +134,7 @@ internal static class PipelineBuilder
             ApiKey = model.ApiKey
         };
 
-        var http = new HttpClient();
+        var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
 
         return model.Type switch
         {
