@@ -167,7 +167,7 @@ Generates an image via a locally running **ComfyUI** instance and saves it to di
 | `COMFYUI_ENDPOINT`   | `http://localhost:8188`              | Base URL of the ComfyUI instance                      |
 | `COMFYUI_CHECKPOINT` | `v1-5-pruned-emaonly.safetensors`    | Default checkpoint filename. Must exist in ComfyUI's `models/checkpoints/` directory. |
 
-### Pipeline (stdin JSON)
+### Single image (stdin JSON)
 
 ```json
 {
@@ -176,24 +176,59 @@ Generates an image via a locally running **ComfyUI** instance and saves it to di
   "negativePrompt": "background, shadow, blurry, low quality, deformed",
   "width": 512,
   "height": 512,
-  "steps": 25,
-  "cfg": 7,
+  "steps": 6,
+  "cfg": 2.0,
   "seed": 42,
-  "checkpoint": "dreamshaper_8.safetensors"
+  "checkpoint": "dreamshaperXL_lightning.safetensors",
+  "sampler": "dpmpp_sde",
+  "scheduler": "karras"
 }
 ```
 
-| Field            | Required | Default                           | Description                                                                                   |
-|------------------|----------|-----------------------------------|-----------------------------------------------------------------------------------------------|
-| `prompt`         | Yes      | —                                 | Positive prompt. Include art style, colours, subject, and composition.                        |
-| `outputPath`     | Yes      | —                                 | Absolute path where the PNG will be saved. Parent directories are created automatically.       |
-| `negativePrompt` | No       | Common quality/artefact terms     | Things to avoid. Tune per asset type (e.g. add `'background'` for sprites).                  |
-| `width`          | No       | `1024`                            | Width in pixels. Must be a multiple of 8.                                                     |
-| `height`         | No       | `1024`                            | Height in pixels. Must be a multiple of 8.                                                    |
-| `steps`          | No       | `25`                              | Sampling steps. 20–30 is a good range.                                                        |
-| `cfg`            | No       | `7.0`                             | Classifier-free guidance scale. 6–8 for balanced results.                                     |
-| `seed`           | No       | Random                            | Fixed seed for reproducibility.                                                                |
-| `checkpoint`     | No       | `COMFYUI_CHECKPOINT` env var      | Checkpoint filename in `models/checkpoints/`. Overrides the env var for this call only.       |
+### Bulk image generation (stdin JSON)
+
+Generate multiple images sequentially from a single call. Common fields go in `defaults` and are shared across all images; per-image fields go in each `images` entry. Per-image values override defaults when both are present.
+
+```json
+{
+  "defaults": {
+    "checkpoint": "dreamshaperXL_lightning.safetensors",
+    "sampler": "dpmpp_sde",
+    "scheduler": "karras",
+    "steps": 6,
+    "cfg": 2.0,
+    "negativePrompt": "blurry, low quality, deformed"
+  },
+  "images": [
+    { "prompt": "knight in armour, pixel art",  "outputPath": "C:/assets/knight.png",  "width": 512,  "height": 512  },
+    { "prompt": "level background, forest",     "outputPath": "C:/assets/bg.png",      "width": 1344, "height": 768  },
+    { "prompt": "rogue in shadow, game sprite", "outputPath": "C:/assets/rogue.png",   "width": 512,  "height": 512, "seed": 42 }
+  ]
+}
+```
+
+Images are generated one at a time. Each completed image prints `OK: <path> (<bytes> bytes)` to stdout. VRAM is freed once at the end of the whole batch, not between images.
+
+**Fields — common (put in `defaults`):**
+
+| Field            | Default                           | Description                                                             |
+|------------------|-----------------------------------|-------------------------------------------------------------------------|
+| `negativePrompt` | Common quality/artefact terms     | Things to avoid in all images.                                          |
+| `steps`          | `25`                              | Sampling steps.                                                         |
+| `cfg`            | `7.0`                             | Classifier-free guidance scale.                                         |
+| `checkpoint`     | `COMFYUI_CHECKPOINT` env var      | Checkpoint filename in `models/checkpoints/`.                           |
+| `sampler`        | `"euler"`                         | ComfyUI sampler name.                                                   |
+| `scheduler`      | `"normal"`                        | ComfyUI scheduler name.                                                 |
+
+**Fields — per-image (put in each `images[]` entry):**
+
+| Field        | Required | Default | Description                                                              |
+|--------------|----------|---------|--------------------------------------------------------------------------|
+| `prompt`     | Yes      | —       | Positive prompt for this image.                                          |
+| `outputPath` | Yes      | —       | Absolute path where the PNG will be saved.                               |
+| `width`      | No       | `1024`  | Width in pixels. Must be a multiple of 8. Varies per asset type.        |
+| `height`     | No       | `1024`  | Height in pixels. Must be a multiple of 8. Varies per asset type.       |
+| `seed`       | No       | Random  | Fixed seed. If omitted, each image gets a fresh random seed.             |
 
 ### Recommended dimensions by asset type
 
