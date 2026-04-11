@@ -9,7 +9,7 @@ var stdin = await Console.In.ReadToEndAsync();
 if (string.IsNullOrWhiteSpace(stdin))
 {
     Console.Error.WriteLine("Usage: echo '<json>' | image-generator");
-    Console.Error.WriteLine("Fields: prompt (required), outputPath (required), negativePrompt, width, height, steps, cfg, seed, checkpoint");
+    Console.Error.WriteLine("Fields: prompt (required), outputPath (required), negativePrompt, width, height, steps, cfg, seed, checkpoint, sampler, scheduler");
     return 1;
 }
 
@@ -31,7 +31,9 @@ var height         = json.TryGetProperty("height",          out var hProp)    ? 
 var steps          = json.TryGetProperty("steps",           out var stProp)   ? stProp.GetInt32()                           : 25;
 var cfg            = json.TryGetProperty("cfg",             out var cfgProp)  ? cfgProp.GetDouble()                         : 7.0;
 var seed           = json.TryGetProperty("seed",            out var seedProp) ? seedProp.GetInt64()                         : Random.Shared.NextInt64(0, long.MaxValue);
-var checkpoint     = json.TryGetProperty("checkpoint",      out var ckptProp) ? ckptProp.GetString() ?? DefaultCheckpoint() : DefaultCheckpoint();
+var checkpoint     = json.TryGetProperty("checkpoint",      out var ckptProp)  ? ckptProp.GetString()  ?? DefaultCheckpoint()   : DefaultCheckpoint();
+var sampler        = json.TryGetProperty("sampler",         out var sampProp)  ? sampProp.GetString()  ?? "euler"               : "euler";
+var scheduler      = json.TryGetProperty("scheduler",       out var schedProp) ? schedProp.GetString() ?? "normal"              : "normal";
 var endpoint       = Environment.GetEnvironmentVariable("COMFYUI_ENDPOINT") ?? "http://localhost:8188";
 var clientId       = Guid.NewGuid().ToString("N");
 
@@ -55,8 +57,8 @@ var workflow = new Dictionary<string, object>
             seed,
             steps,
             cfg,
-            sampler_name   = "euler",
-            scheduler      = "normal",
+            sampler_name   = sampler,
+            scheduler      = scheduler,
             denoise        = 1.0,
             model          = new object[] { "1", 0 },
             positive       = new object[] { "2", 0 },
