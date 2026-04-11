@@ -204,19 +204,25 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
     if (editingNodeId === nodeId) setEditingNodeId(null)
   }
 
-  async function handleSave() {
+  async function handleSave(toolsOverride?: ToolConfig[]) {
     setSaveStatus('saving')
     setSaveError(null)
     try {
+      const effectiveTools = toolsOverride ?? tools
       const pipeline = toPipeline(nodes, edges, { pipelineName, startNodeId })
-      await saveWorkspace(directory, pipeline, models, tools, agents)
-      onSaved({ pipeline, models, tools, agents })
+      await saveWorkspace(directory, pipeline, models, effectiveTools, agents)
+      onSaved({ pipeline, models, tools: effectiveTools, agents })
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus('idle'), 2000)
     } catch (err) {
       setSaveError(String(err))
       setSaveStatus('error')
     }
+  }
+
+  function handleSaveTools(updatedTools: ToolConfig[]) {
+    setTools(updatedTools)
+    handleSave(updatedTools)
   }
 
   async function handleRun(input: string) {
@@ -262,6 +268,7 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
         onModelsChange={setModels}
         tools={tools}
         onToolsChange={setTools}
+        onToolsSave={handleSaveTools}
         agents={agents}
         onAgentsChange={setAgents}
         directory={directory}

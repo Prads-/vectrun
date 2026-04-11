@@ -4,6 +4,7 @@ import type { ToolConfig } from '../../types/workspace'
 interface Props {
   tools: ToolConfig[]
   onChange: (tools: ToolConfig[]) => void
+  onSave: (tools: ToolConfig[]) => void
 }
 
 const emptyTool = (): ToolConfig => ({
@@ -14,7 +15,7 @@ const emptyTool = (): ToolConfig => ({
   pathType: 'relative',
 })
 
-export function ToolsPanel({ tools, onChange }: Props) {
+export function ToolsPanel({ tools, onChange, onSave }: Props) {
   const [selected, setSelected] = useState<ToolConfig | null>(null)
   const [isNew, setIsNew] = useState(false)
   const [form, setForm] = useState<ToolConfig>(emptyTool())
@@ -57,17 +58,19 @@ export function ToolsPanel({ tools, onChange }: Props) {
 
   function saveForm() {
     if (paramsError) return
-    if (isNew) {
-      onChange([...tools, form])
-    } else {
-      onChange(tools.map(t => t.name === selected?.name ? form : t))
-    }
+    const updated = isNew
+      ? [...tools, form]
+      : tools.map(t => t.name === selected?.name ? form : t)
+    onChange(updated)
     cancelEdit()
+    onSave(updated)
   }
 
   function deleteTool(name: string) {
-    onChange(tools.filter(t => t.name !== name))
+    const updated = tools.filter(t => t.name !== name)
+    onChange(updated)
     if (selected?.name === name) cancelEdit()
+    onSave(updated)
   }
 
   const showForm = isNew || selected !== null

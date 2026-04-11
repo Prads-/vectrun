@@ -45,6 +45,7 @@ interface Props {
   // tools
   tools: ToolConfig[]
   onToolsChange: (t: ToolConfig[]) => void
+  onToolsSave: (t: ToolConfig[]) => void
   // agents
   agents: AgentConfig[]
   onAgentsChange: (a: AgentConfig[]) => void
@@ -62,7 +63,7 @@ export function LeftSidebar({
   nodes, selectedNodeId, editingNodeId, pipelineName, startNodeId,
   onSelectNode, onEditNode, onDeleteNode, onNodeDataChange, onPipelineMetaChange, onAddNode,
   models, onModelsChange,
-  tools, onToolsChange,
+  tools, onToolsChange, onToolsSave,
   agents, onAgentsChange,
   directory, isRunning, onRun, saveStatus, saveError, onSave,
 }: Props) {
@@ -190,7 +191,7 @@ export function LeftSidebar({
               />
             )}
             {activeSection === 'tools' && (
-              <ToolsPanel tools={tools} onChange={onToolsChange} />
+              <ToolsPanel tools={tools} onChange={onToolsChange} onSave={onToolsSave} />
             )}
             {activeSection === 'run' && (
               <div className="p-4">
