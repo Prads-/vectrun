@@ -22,7 +22,7 @@ const emptyAgent = (): AgentConfig => ({
 })
 
 export function AgentsPanel({ agents, models, tools, onChange, onSave, onAddToCanvas }: Props) {
-  const [selected, setSelected] = useState<AgentConfig | null>(null)
+  const [editing, setEditing] = useState<AgentConfig | null>(null)
   const [isNew, setIsNew] = useState(false)
   const [form, setForm] = useState<AgentConfig>(emptyAgent())
   const [schemaText, setSchemaText] = useState('')
@@ -33,19 +33,19 @@ export function AgentsPanel({ agents, models, tools, onChange, onSave, onAddToCa
     setSchemaText('')
     setSchemaError(null)
     setIsNew(true)
-    setSelected(null)
+    setEditing(null)
   }
 
   function startEdit(agent: AgentConfig) {
     setForm({ ...agent, toolIds: [...(agent.toolIds ?? [])] })
     setSchemaText(agent.outputSchema != null ? JSON.stringify(agent.outputSchema, null, 2) : '')
     setSchemaError(null)
-    setSelected(agent)
+    setEditing(agent)
     setIsNew(false)
   }
 
   function cancelEdit() {
-    setSelected(null)
+    setEditing(null)
     setIsNew(false)
     setSchemaError(null)
   }
@@ -75,7 +75,7 @@ export function AgentsPanel({ agents, models, tools, onChange, onSave, onAddToCa
     }
     const updated = isNew
       ? [...agents, cleaned]
-      : agents.map(a => a.agentName === selected?.agentName ? cleaned : a)
+      : agents.map(a => a.agentName === editing?.agentName ? cleaned : a)
     onChange(updated)
     cancelEdit()
     onSave(updated)
@@ -84,7 +84,6 @@ export function AgentsPanel({ agents, models, tools, onChange, onSave, onAddToCa
   function deleteAgent(name: string) {
     const updated = agents.filter(a => a.agentName !== name)
     onChange(updated)
-    if (selected?.agentName === name) cancelEdit()
     onSave(updated)
   }
 
@@ -96,11 +95,126 @@ export function AgentsPanel({ agents, models, tools, onChange, onSave, onAddToCa
     setForm(f => ({ ...f, toolIds: next }))
   }
 
-  const showForm = isNew || selected !== null
+  // ── Edit / New form view ───────────────────────────────────────────────────
+  if (isNew || editing !== null) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-100 shrink-0">
+          <button
+            onClick={cancelEdit}
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition"
+          >
+            <ChevronLeftIcon />
+            All agents
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="flex flex-col gap-3 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              {isNew ? 'New agent' : 'Edit agent'}
+            </p>
+            <Field label="Agent name">
+              <input
+                value={form.agentName}
+                onChange={e => setForm(f => ({ ...f, agentName: e.target.value }))}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Model">
+              <select
+                value={form.modelId}
+                onChange={e => setForm(f => ({ ...f, modelId: e.target.value }))}
+                className={inputClass}
+              >
+                <option value="">— select model —</option>
+                {models.map(m => (
+                  <option key={m.id} value={m.id}>{m.name || m.id}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Output">
+              <select
+                value={form.output}
+                onChange={e => setForm(f => ({ ...f, output: e.target.value as AgentConfig['output'] }))}
+                className={inputClass}
+              >
+                <option value="plain_text">plain_text</option>
+                <option value="json">json</option>
+              </select>
+            </Field>
+            {form.output === 'json' && (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-slate-500">Output schema (optional JSON Schema)</span>
+                <textarea
+                  value={schemaText}
+                  onChange={e => handleSchemaChange(e.target.value)}
+                  rows={6}
+                  className={`${inputClass} resize-y font-mono text-xs ${schemaError ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : ''}`}
+                  placeholder={'{\n  "type": "object",\n  "properties": { ... }\n}'}
+                />
+                {schemaError && (
+                  <span className="text-xs text-red-500">{schemaError}</span>
+                )}
+              </div>
+            )}
+            <Field label="System prompt (optional)">
+              <textarea
+                value={form.systemPrompt ?? ''}
+                onChange={e => setForm(f => ({ ...f, systemPrompt: e.target.value }))}
+                rows={3}
+                className={`${inputClass} resize-y`}
+              />
+            </Field>
+            <Field label="Prompt template (optional)">
+              <textarea
+                value={form.prompt ?? ''}
+                onChange={e => setForm(f => ({ ...f, prompt: e.target.value }))}
+                rows={3}
+                className={`${inputClass} resize-y`}
+                placeholder="Use {PREVIOUS_AGENT_OUTPUT} to inject prior output"
+              />
+            </Field>
+            {tools.length > 0 && (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-slate-500">Tools</span>
+                {tools.map(t => (
+                  <label key={t.name} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={(form.toolIds ?? []).includes(t.name)}
+                      onChange={() => toggleTool(t.name)}
+                      className="rounded border-slate-300"
+                    />
+                    <span className="text-sm text-slate-700">{t.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={saveForm}
+                disabled={!!schemaError}
+                className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save
+              </button>
+              <button
+                onClick={cancelEdit}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
+  // ── List view ──────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between px-4 pt-4 pb-3 shrink-0">
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-slate-100 shrink-0">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Agents</p>
         <button
           onClick={startNew}
@@ -109,150 +223,57 @@ export function AgentsPanel({ agents, models, tools, onChange, onSave, onAddToCa
           + Add agent
         </button>
       </div>
-
-      <div className="flex-1 overflow-y-auto">
-      <div className="flex flex-col gap-4 px-4 pb-4">
-      <div className="flex flex-col gap-1">
-        {agents.length === 0 && !showForm && (
+      <div className="flex-1 overflow-y-auto px-4 py-3">
+        {agents.length === 0 ? (
           <p className="text-xs text-slate-400 italic">No agents configured.</p>
-        )}
-        {agents.map(a => (
-          <div
-            key={a.agentName}
-            draggable
-            onDragStart={e => {
-              const data: NodeDragData = { nodeType: 'agent', agentId: a.agentName }
-              e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(data))
-              e.dataTransfer.effectAllowed = 'move'
-            }}
-            className={`flex items-center gap-2 rounded-lg px-3 py-2 cursor-grab active:cursor-grabbing transition select-none ${selected?.agentName === a.agentName ? 'bg-violet-50 border border-violet-200' : 'border border-transparent hover:bg-slate-50'}`}
-            onClick={() => startEdit(a)}
-            title="Drag to add to canvas"
-          >
-            <GripIcon />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-slate-700 truncate">{a.agentName}</p>
-              <p className="text-xs text-slate-400 truncate">{a.modelId}</p>
-            </div>
-            {onAddToCanvas && (
-              <button
-                onClick={e => { e.stopPropagation(); onAddToCanvas(a.agentName) }}
-                className="shrink-0 rounded p-1 text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition"
-                title="Add to canvas"
+        ) : (
+          <div className="flex flex-col gap-1">
+            {agents.map(a => (
+              <div
+                key={a.agentName}
+                draggable
+                onDragStart={e => {
+                  const data: NodeDragData = { nodeType: 'agent', agentId: a.agentName }
+                  e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(data))
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                className="group flex items-center gap-2 rounded-lg border border-transparent px-2.5 py-2 cursor-grab active:cursor-grabbing hover:bg-slate-50 hover:border-slate-100 transition select-none"
+                title="Drag to add to canvas"
               >
-                <PlusIcon />
-              </button>
-            )}
-            <button
-              onClick={e => { e.stopPropagation(); deleteAgent(a.agentName) }}
-              className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 transition"
-            >
-              <TrashIcon />
-            </button>
+                <GripIcon />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-700 truncate">{a.agentName}</p>
+                  <p className="text-xs text-slate-400 truncate">{a.modelId}</p>
+                </div>
+                <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                  {onAddToCanvas && (
+                    <button
+                      onClick={e => { e.stopPropagation(); onAddToCanvas(a.agentName) }}
+                      className="rounded-md p-1.5 text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition"
+                      title="Add to canvas"
+                    >
+                      <PlusIcon />
+                    </button>
+                  )}
+                  <button
+                    onClick={e => { e.stopPropagation(); startEdit(a) }}
+                    className="rounded-md p-1.5 text-slate-400 hover:bg-white hover:text-slate-700 transition"
+                    title="Edit agent"
+                  >
+                    <EditIcon />
+                  </button>
+                  <button
+                    onClick={e => { e.stopPropagation(); deleteAgent(a.agentName) }}
+                    className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 transition"
+                    title="Delete agent"
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-
-      {showForm && (
-        <div className="flex flex-col gap-3 border-t border-slate-100 pt-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            {isNew ? 'New agent' : 'Edit agent'}
-          </p>
-          <Field label="Agent name">
-            <input
-              value={form.agentName}
-              onChange={e => setForm(f => ({ ...f, agentName: e.target.value }))}
-              className={inputClass}
-            />
-          </Field>
-          <Field label="Model">
-            <select
-              value={form.modelId}
-              onChange={e => setForm(f => ({ ...f, modelId: e.target.value }))}
-              className={inputClass}
-            >
-              <option value="">— select model —</option>
-              {models.map(m => (
-                <option key={m.id} value={m.id}>{m.name || m.id}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Output">
-            <select
-              value={form.output}
-              onChange={e => setForm(f => ({ ...f, output: e.target.value as AgentConfig['output'] }))}
-              className={inputClass}
-            >
-              <option value="plain_text">plain_text</option>
-              <option value="json">json</option>
-            </select>
-          </Field>
-          {form.output === 'json' && (
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-slate-500">Output schema (optional JSON Schema)</span>
-              <textarea
-                value={schemaText}
-                onChange={e => handleSchemaChange(e.target.value)}
-                rows={6}
-                className={`${inputClass} resize-y font-mono text-xs ${schemaError ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : ''}`}
-                placeholder={'{\n  "type": "object",\n  "properties": { ... }\n}'}
-              />
-              {schemaError && (
-                <span className="text-xs text-red-500">{schemaError}</span>
-              )}
-            </div>
-          )}
-          <Field label="System prompt (optional)">
-            <textarea
-              value={form.systemPrompt ?? ''}
-              onChange={e => setForm(f => ({ ...f, systemPrompt: e.target.value }))}
-              rows={3}
-              className={`${inputClass} resize-y`}
-            />
-          </Field>
-          <Field label="Prompt template (optional)">
-            <textarea
-              value={form.prompt ?? ''}
-              onChange={e => setForm(f => ({ ...f, prompt: e.target.value }))}
-              rows={3}
-              className={`${inputClass} resize-y`}
-              placeholder="Use {PREVIOUS_AGENT_OUTPUT} to inject prior output"
-            />
-          </Field>
-          {tools.length > 0 && (
-            <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-slate-500">Tools</span>
-              {tools.map(t => (
-                <label key={t.name} className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={(form.toolIds ?? []).includes(t.name)}
-                    onChange={() => toggleTool(t.name)}
-                    className="rounded border-slate-300"
-                  />
-                  <span className="text-sm text-slate-700">{t.name}</span>
-                </label>
-              ))}
-            </div>
-          )}
-          <div className="flex gap-2 pt-1">
-            <button
-              onClick={saveForm}
-              disabled={!!schemaError}
-              className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-600 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Save
-            </button>
-            <button
-              onClick={cancelEdit}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-      </div>
+        )}
       </div>
     </div>
   )
@@ -269,6 +290,14 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const inputClass = 'rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100 w-full'
 
+function ChevronLeftIcon() {
+  return (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+    </svg>
+  )
+}
+
 function GripIcon() {
   return (
     <svg className="h-3.5 w-3.5 text-slate-300 shrink-0" viewBox="0 0 20 20" fill="currentColor">
@@ -281,15 +310,23 @@ function GripIcon() {
 
 function PlusIcon() {
   return (
-    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
       <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+    </svg>
+  )
+}
+
+function EditIcon() {
+  return (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+      <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
     </svg>
   )
 }
 
 function TrashIcon() {
   return (
-    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
       <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
     </svg>
   )

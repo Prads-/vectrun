@@ -85,15 +85,74 @@ catch (TimeoutException) { /* best-effort — content already loaded */ }
 
 if (extractText)
 {
-    // Remove noise elements from the live DOM before extracting text.
-    // script/style/noscript contain code or hidden text; template elements are inert.
-    // Working on the live DOM is fine in a headless context.
-    // Note: innerText is layout-dependent and only works on attached nodes, so we
-    // cannot use it on a cloneNode — we strip in-place instead.
-    var text = await page.EvaluateAsync<string>(@"() => {
-        document.querySelectorAll('script, style, noscript, template').forEach(e => e.remove());
-        return document.body.innerText;
-    }");
+    string text;
+
+    if (url.Contains("google.com/search", StringComparison.OrdinalIgnoreCase))
+    {
+        // For Google search results pages, extract structured results directly from
+        // the DOM rather than using innerText. This gives clean title / URL / snippet
+        // tuples and avoids the breadcrumb URL display format entirely.
+        text = await page.EvaluateAsync<string>(@"() => {
+            const seen = new Set();
+            const results = [];
+
+            document.querySelectorAll('h3').forEach(h3 => {
+                const title = h3.innerText.trim();
+                if (!title) return;
+
+                // Walk up the DOM to find the enclosing <a> that holds the result URL.
+                let a = h3.closest('a');
+                if (!a) a = h3.parentElement && h3.parentElement.querySelector('a');
+                if (!a) a = h3.parentElement && h3.parentElement.parentElement &&
+                              h3.parentElement.parentElement.querySelector('a');
+
+                const href = a && a.href ? a.href : '';
+                // Skip Google-internal links, anchors, and duplicates.
+                if (!href || href.includes('google.com') || href.startsWith('/') || seen.has(href)) return;
+                seen.add(href);
+
+                // Walk up from h3 looking for an ancestor whose next sibling holds
+                // the snippet. This is purely structural — no class names or data
+                // attributes — so it survives Google's obfuscation churn.
+                let node = h3;
+                let snippet = '';
+                for (let i = 0; i < 8 && node && node !== document.body; i++) {
+                    node = node.parentElement;
+                    if (!node) break;
+                    let sib = node.nextElementSibling;
+                    while (sib) {
+                        const t = (sib.innerText || '').trim();
+                        if (t.length > 40 && t !== title && !t.startsWith('http')) {
+                            snippet = t.substring(0, 400);
+                            break;
+                        }
+                        sib = sib.nextElementSibling;
+                    }
+                    if (snippet) break;
+                }
+
+                results.push(title + '\n' + href + (snippet ? '\n' + snippet : ''));
+            });
+
+            // Fall back to innerText if the DOM structure didn't yield results
+            // (e.g. Google served a CAPTCHA or a layout we don't recognise).
+            if (results.length === 0) {
+                document.querySelectorAll('script, style, noscript, template').forEach(e => e.remove());
+                return document.body.innerText;
+            }
+
+            return results.join('\n\n');
+        }");
+    }
+    else
+    {
+        // For all other pages remove noise elements and return visible text.
+        text = await page.EvaluateAsync<string>(@"() => {
+            document.querySelectorAll('script, style, noscript, template').forEach(e => e.remove());
+            return document.body.innerText;
+        }");
+    }
+
     Console.WriteLine(text);
 }
 else
