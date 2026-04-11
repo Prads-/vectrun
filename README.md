@@ -116,12 +116,20 @@ Supported types: `anthropic`, `open_ai`, `ollama`, `vllm`, `llama.cpp`
       "properties": { "query": { "type": "string" } },
       "required": ["query"]
     },
-    "path": "search"
+    "path": "search/bin/Release/net9.0/search.exe",
+    "pathType": "relative"
   }
 ]
 ```
 
-Tool executables live in the `tools/` subdirectory. Input is passed via stdin, output is read from stdout.
+Input is passed via stdin, output is read from stdout.
+
+| Field | Description |
+|---|---|
+| `path` | Path to the tool executable. |
+| `pathType` | `"relative"` (default) — resolved as `<pipeline folder>/tools/<path>`. `"absolute"` — used as-is. |
+
+Both `pathType` options are configurable in the web editor's **Tools** panel, which shows the resolved path pattern as a hint beneath the input.
 
 ### agents/my-agent.json
 
@@ -144,7 +152,7 @@ Tool executables live in the `tools/` subdirectory. Input is passed via stdin, o
 |---|---|
 | **agent** | Sends a request to an AI model. Runs a tool-calling loop until the model stops calling tools. |
 | **branch** | Compares input to `expectedOutput` (optional). Routes to `trueNodeIds` on match, `falseNodeIds` on mismatch. If `expectedOutput` is omitted, always routes to `trueNodeIds`. |
-| **logic** | Runs an external process (`logicType: "process"`) or an embedded Lua script (`logicType: "script"`). Input via stdin, output from stdout or return value. A process fails if it exits with a non-zero code or writes anything to stderr. |
+| **logic** | Runs an external process (`logicType: "process"`) or an embedded Lua script (`logicType: "script"`). Input via stdin, output from stdout or return value. A process fails if it exits with a non-zero code or writes anything to stderr. Set `processPathType` to `"relative"` (default, resolved relative to the pipeline folder) or `"absolute"`. |
 | **wait** | Sleeps for `durationMs` milliseconds, then passes input through unchanged. |
 
 All node types support an optional `name` field for human-readable labelling.
@@ -254,6 +262,42 @@ scaffold-claude <project-directory>
 The requirements text is read from stdin (piped from a previous node). Claude Code must be installed and available in `PATH`. The project directory is created if it does not exist.
 
 **Example pipeline use:** an agent node summarises or refines raw requirements → `scaffold-claude` scaffolds and builds the project → a downstream node reads the build summary.
+
+### image-generator
+
+Generates an image via a local [ComfyUI](https://github.com/comfyanonymous/ComfyUI) instance and saves it to disk. Input is a JSON object read from stdin.
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `prompt` | yes | — | Positive prompt describing the image. |
+| `outputPath` | yes | — | Absolute path where the PNG will be saved. |
+| `negativePrompt` | no | built-in quality defaults | Things to avoid in the image. |
+| `width` | no | `1024` | Image width in pixels (must be a multiple of 8). |
+| `height` | no | `1024` | Image height in pixels (must be a multiple of 8). |
+| `steps` | no | `25` | Sampling steps. Use `6`–`8` for Lightning/Turbo models. |
+| `cfg` | no | `7.0` | Classifier-free guidance scale. Use `1.5`–`2.0` for Lightning/Turbo models. |
+| `seed` | no | random | Fixed seed for reproducibility. |
+| `checkpoint` | no | `COMFYUI_CHECKPOINT` env var | Checkpoint filename as it appears in ComfyUI's `models/checkpoints/` folder. |
+| `sampler` | no | `"euler"` | ComfyUI sampler name (e.g. `"dpmpp_sde"` for DPM++ SDE models). |
+| `scheduler` | no | `"normal"` | ComfyUI scheduler name (e.g. `"karras"`). |
+
+ComfyUI must be running and reachable at `http://localhost:8188` (override with the `COMFYUI_ENDPOINT` environment variable). No special ComfyUI extensions are required — only built-in nodes are used.
+
+**Example — DreamShaper XL Lightning DPM++ SDE:**
+
+```json
+{
+  "prompt": "a knight in a forest, cinematic lighting",
+  "outputPath": "C:/output/knight.png",
+  "checkpoint": "dreamshaperXL_lightningDPMSDE.safetensors",
+  "sampler": "dpmpp_sde",
+  "scheduler": "karras",
+  "steps": 6,
+  "cfg": 2.0
+}
+```
+
+Place checkpoint `.safetensors` files in ComfyUI's `models/checkpoints/` folder. SDXL-based checkpoints (native 1024×1024) are recommended for the default resolution; if using SD 1.5 checkpoints, set `width` and `height` to `512`.
 
 ## State management
 

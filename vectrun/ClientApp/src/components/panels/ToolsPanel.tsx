@@ -149,6 +149,11 @@ export function ToolsPanel({ tools, onChange }: Props) {
               onChange={e => setForm(f => ({ ...f, path: e.target.value }))}
               className={inputClass}
             />
+            {form.pathType === 'relative' && (
+              <span className="text-xs text-slate-400">
+                Resolved as: <span className="font-mono">&lt;pipeline folder&gt;/tools/&lt;path&gt;</span>
+              </span>
+            )}
           </Field>
           <Field label="Parameters (JSON schema)">
             <textarea

@@ -208,14 +208,40 @@ function LogicForm({ data, onChange }: {
         </select>
       </label>
       {data.logicType === 'process' && (
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-slate-500">Process path</span>
-          <input
-            value={data.processPath ?? ''}
-            onChange={e => onChange({ ...data, processPath: e.target.value })}
-            className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-          />
-        </label>
+        <>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-500">Path type</span>
+            <div className="flex gap-3">
+              {(['relative', 'absolute'] as const).map(pt => (
+                <label key={pt} className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="processPathType"
+                    value={pt}
+                    checked={(data.processPathType ?? 'relative') === pt}
+                    onChange={() => onChange({ ...data, processPathType: pt })}
+                  />
+                  <span className="text-sm text-slate-700 capitalize">{pt}</span>
+                </label>
+              ))}
+            </div>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-500">
+              {(data.processPathType ?? 'relative') === 'relative' ? 'Process path (relative to pipeline folder)' : 'Process path (absolute)'}
+            </span>
+            <input
+              value={data.processPath ?? ''}
+              onChange={e => onChange({ ...data, processPath: e.target.value })}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+            {(data.processPathType ?? 'relative') === 'relative' && (
+              <span className="text-xs text-slate-400">
+                Resolved as: <span className="font-mono">&lt;pipeline folder&gt;/&lt;path&gt;</span>
+              </span>
+            )}
+          </label>
+        </>
       )}
       {data.logicType === 'script' && (
         <label className="flex flex-col gap-1">

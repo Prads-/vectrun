@@ -26,6 +26,7 @@ export interface LogicNodeData extends Record<string, unknown> {
   logicType: string
   script?: string
   processPath?: string
+  processPathType?: 'relative' | 'absolute'
   nextNodeIds?: string[]
   retry?: RetryPolicy
 }

@@ -31,7 +31,7 @@ internal static class PipelineBuilder
 
         var nodes = pipeline.Nodes.ToDictionary(
             n => n.Id,
-            n => BuildNode(n, models, tools, agents, queues));
+            n => BuildNode(n, models, tools, agents, queues, directory));
 
         return new BuiltPipeline
         {
@@ -72,7 +72,8 @@ internal static class PipelineBuilder
         Dictionary<string, ModelConfig> models,
         Dictionary<string, IToolDefinition> tools,
         Dictionary<string, AgentConfig> agents,
-        AgentMessageQueues queues)
+        AgentMessageQueues queues,
+        string directory)
     {
         var data = (JsonElement)node.Data;
 
@@ -80,10 +81,19 @@ internal static class PipelineBuilder
         {
             "agent" => BuildAgentNode(node.Id, data.Deserialize<AgentNodeData>(JsonOptions)!, models, tools, agents, queues),
             "branch" => new BranchNode(node.Id, data.Deserialize<BranchNodeData>(JsonOptions)!),
-            "logic" => new LogicNode(node.Id, data.Deserialize<LogicNodeData>(JsonOptions)!),
+            "logic" => new LogicNode(node.Id, ResolveLogicNodeData(data.Deserialize<LogicNodeData>(JsonOptions)!, directory)),
             "wait" => new WaitNode(node.Id, data.Deserialize<WaitNodeData>(JsonOptions)!),
             _ => throw new InvalidOperationException($"Unknown node type: {node.Type}")
         };
+    }
+
+    private static LogicNodeData ResolveLogicNodeData(LogicNodeData data, string directory)
+    {
+        if (data.LogicType != "process" || data.ProcessPath is null || data.ProcessPathType == "absolute")
+            return data;
+
+        data.ProcessPath = Path.Combine(directory, data.ProcessPath);
+        return data;
     }
 
     private static INode BuildAgentNode(

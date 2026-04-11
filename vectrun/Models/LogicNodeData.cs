@@ -7,6 +7,7 @@ internal class LogicNodeData : NodeData
 
     // Process
     public string? ProcessPath { get; set; }
+    public string ProcessPathType { get; set; } = "relative"; // "relative" (to pipeline dir) or "absolute"
 
     // Script
     public string? ScriptLanguage { get; set; }
