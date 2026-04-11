@@ -47,9 +47,17 @@ var page = await browser.NewPageAsync();
 
 await page.GotoAsync(url, new PageGotoOptions
 {
-    WaitUntil = WaitUntilState.NetworkIdle,
+    WaitUntil = WaitUntilState.Load,
     Timeout = 30_000,
 });
+
+// Give JS-rendered content a chance to settle, but don't hard-fail on
+// analytics-heavy sites that never reach full network idle.
+try
+{
+    await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new() { Timeout = 25_000 });
+}
+catch (TimeoutException) { /* best-effort — content already loaded */ }
 
 var html = await page.ContentAsync();
 Console.WriteLine(html);
