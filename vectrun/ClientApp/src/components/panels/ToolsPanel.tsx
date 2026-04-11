@@ -11,6 +11,7 @@ const emptyTool = (): ToolConfig => ({
   description: '',
   parameters: {},
   path: '',
+  pathType: 'relative',
 })
 
 export function ToolsPanel({ tools, onChange }: Props) {
@@ -126,7 +127,23 @@ export function ToolsPanel({ tools, onChange }: Props) {
               className={inputClass}
             />
           </Field>
-          <Field label="Path (relative to tools/)">
+          <Field label="Path type">
+            <div className="flex gap-3">
+              {(['relative', 'absolute'] as const).map(pt => (
+                <label key={pt} className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="pathType"
+                    value={pt}
+                    checked={form.pathType === pt}
+                    onChange={() => setForm(f => ({ ...f, pathType: pt }))}
+                  />
+                  <span className="text-sm text-slate-700 capitalize">{pt}</span>
+                </label>
+              ))}
+            </div>
+          </Field>
+          <Field label={form.pathType === 'relative' ? 'Path (relative to tools/)' : 'Path (absolute)'}>
             <input
               value={form.path}
               onChange={e => setForm(f => ({ ...f, path: e.target.value }))}

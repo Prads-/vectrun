@@ -54,7 +54,7 @@ internal static class PipelineBuilder
                     Name = t.Name,
                     Description = t.Description,
                     Parameters = t.Parameters,
-                    Path = Path.Combine(toolsDir, t.Path)
+                    Path = t.PathType == "absolute" ? t.Path : Path.Combine(toolsDir, t.Path)
                 };
             });
     }

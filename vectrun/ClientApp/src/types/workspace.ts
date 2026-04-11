@@ -11,6 +11,7 @@ export interface ToolConfig {
   description: string
   parameters: Record<string, unknown>
   path: string
+  pathType: 'relative' | 'absolute'
 }
 
 export interface AgentConfig {
