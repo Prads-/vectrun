@@ -29,7 +29,12 @@ internal class OllamaAIClient : BaseAIClient
                         content = m.Content,
                         tool_calls = m.ToolCalls.Select(tc => new
                         {
-                            function = new { name = tc.Name, arguments = tc.Arguments }
+                            function = new
+                            {
+                                name = tc.Name,
+                                // Arguments must be sent as a JSON object, not a quoted string
+                                arguments = JsonSerializer.Deserialize<JsonElement>(tc.Arguments, JsonOptions)
+                            }
                         })
                     };
 

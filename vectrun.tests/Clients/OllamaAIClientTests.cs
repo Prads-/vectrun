@@ -139,4 +139,39 @@ public class OllamaAIClientTests
 
         Assert.Equal("", response.Message.Content);
     }
+
+    [Fact]
+    public async Task SendAsync_AssistantMessageWithToolCalls_SerializesArgumentsAsObject()
+    {
+        // Regression test: Ollama rejects tool call arguments sent as a quoted JSON string.
+        // Arguments must be serialized as a JSON object in the outgoing payload.
+        var (client, handler) = CreateClient("""{"message":{"role":"assistant","content":"done"}}""");
+
+        await client.SendAsync(new AIChatRequest
+        {
+            Messages =
+            [
+                new AIMessage { Role = "user", Content = "go" },
+                new AIMessage
+                {
+                    Role = "assistant",
+                    Content = "",
+                    ToolCalls = [new AIToolCall { Id = "tc1", Name = "kv_store", Arguments = """{"key":"x","value":"y"}""" }]
+                },
+                new AIMessage { Role = "tool", ToolCallId = "tc1", Name = "kv_store", Content = "OK" }
+            ]
+        }, default);
+
+        var body = JsonSerializer.Deserialize<JsonElement>(handler.LastRequestBody!);
+        var messages = body.GetProperty("messages").EnumerateArray().ToList();
+
+        // The assistant message (index 1) must have tool_calls with arguments as an object, not a string
+        var assistantMsg = messages[1];
+        var toolCall = assistantMsg.GetProperty("tool_calls")[0];
+        var arguments = toolCall.GetProperty("function").GetProperty("arguments");
+
+        Assert.Equal(JsonValueKind.Object, arguments.ValueKind);
+        Assert.Equal("x", arguments.GetProperty("key").GetString());
+        Assert.Equal("y", arguments.GetProperty("value").GetString());
+    }
 }

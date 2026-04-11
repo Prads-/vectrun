@@ -155,6 +155,30 @@ Both `pathType` options are configurable in the web editor's **Tools** panel, wh
 | **logic** | Runs an external process (`logicType: "process"`) or an embedded Lua script (`logicType: "script"`). Input via stdin, output from stdout or return value. A process fails if it exits with a non-zero code or writes anything to stderr. Set `processPathType` to `"relative"` (default, resolved relative to the pipeline folder) or `"absolute"`. |
 | **wait** | Sleeps for `durationMs` milliseconds, then passes input through unchanged. |
 
+### Logic node — `processInput` and `{INPUT}`
+
+By default a logic node pipes the previous node's output directly to the process stdin. Use `processInput` to override this with a hardcoded payload:
+
+```json
+{
+  "logicType": "process",
+  "processPath": "tools/kv-store/kv-store.exe",
+  "processInput": "{\"operation\":\"delete\",\"namespace\":\"my_ns\",\"key\":\"counter\"}"
+}
+```
+
+To inject the previous node's output into a structured payload, use the `{PREVIOUS_AGENT_OUTPUT}` template variable inside `processInput` — the same placeholder used in agent prompts. The value is JSON-escaped before substitution, so it is safe to embed inside a JSON string field:
+
+```json
+{
+  "processInput": "{\"operation\":\"append\",\"namespace\":\"my_ns\",\"key\":\"log\",\"value\":\"{PREVIOUS_AGENT_OUTPUT}\"}"
+}
+```
+
+At runtime `{PREVIOUS_AGENT_OUTPUT}` is replaced with the previous node's output, properly escaped. This is the recommended pattern for reliably writing dynamic data (e.g. agent-generated summaries) to a tool without relying on the agent to make the tool call itself.
+
+`{PREVIOUS_AGENT_OUTPUT}` is configurable in the **Node Properties** panel in the web editor — the process input hint documents the substitution inline.
+
 All node types support an optional `name` field for human-readable labelling.
 
 ## Retry policy
@@ -236,20 +260,29 @@ Fetches the fully-rendered HTML of a URL (JavaScript executed) and writes it to 
 web-scraper <url>
 ```
 
-Uses a headless Chromium browser via Playwright. Waits for network idle before capturing.
+Uses a headless Chromium browser (Playwright / Chromium) with bot-detection mitigations applied: a realistic Chrome user-agent, `AutomationControlled` disabled, and `navigator.webdriver` hidden from JavaScript. Navigation waits for the page `load` event (60 s timeout), then attempts an additional 25 s network-idle wait (best-effort — sites with persistent analytics beacons won't block on this).
 
 ### kv-store
 
 A lightweight, disk-backed key-value store. Data is written to `data/<namespace>/<key-hash>` files next to the executable, so it persists across pipeline runs without any external service.
 
 ```
-kv-store write  <namespace> <key> <value>   # create (fails if key exists)
+kv-store write  <namespace> <key> <value>   # upsert — creates or overwrites
 kv-store update <namespace> <key> <value>   # overwrite (fails if key absent)
-kv-store read   <namespace> <key>           # print value to stdout
-kv-store delete <namespace> <key>           # remove entry
+kv-store read   <namespace> <key>           # print value to stdout; empty string if not found (exit 0)
+kv-store delete <namespace> <key>           # remove entry; no-op if absent (exit 0)
+kv-store append <namespace> <key> <value>   # append to existing value with separator; create if absent
 ```
 
 Namespaces keep agents isolated — each agent can read and write its own namespace without colliding with others. Keys are hashed (SHA-256) so any string is a valid key.
+
+When called via stdin JSON, `append` accepts an optional `"separator"` field (defaults to `"\n\n---\n\n"`):
+
+```json
+{ "operation": "append", "namespace": "logs", "key": "run_1", "value": "new entry", "separator": "\n" }
+```
+
+`read` returns an empty string (exit 0) when the key does not exist, so callers can treat empty as not-found rather than handling a failure. `delete` is idempotent for the same reason.
 
 ### scaffold-claude
 
@@ -281,7 +314,7 @@ Generates an image via a local [ComfyUI](https://github.com/comfyanonymous/Comfy
 | `sampler` | no | `"euler"` | ComfyUI sampler name (e.g. `"dpmpp_sde"` for DPM++ SDE models). |
 | `scheduler` | no | `"normal"` | ComfyUI scheduler name (e.g. `"karras"`). |
 
-ComfyUI must be running and reachable at `http://localhost:8188` (override with the `COMFYUI_ENDPOINT` environment variable). No special ComfyUI extensions are required — only built-in nodes are used.
+ComfyUI must be running and reachable at `http://localhost:8188` (override with the `COMFYUI_ENDPOINT` environment variable). No special ComfyUI extensions are required — only built-in nodes are used. After saving the image the tool automatically calls `POST /free` (`unload_models: true, free_memory: true`) to release VRAM; this is best-effort and does not affect the tool's exit code.
 
 **Example — DreamShaper XL Lightning DPM++ SDE:**
 
@@ -298,6 +331,16 @@ ComfyUI must be running and reachable at `http://localhost:8188` (override with 
 ```
 
 Place checkpoint `.safetensors` files in ComfyUI's `models/checkpoints/` folder. SDXL-based checkpoints (native 1024×1024) are recommended for the default resolution; if using SD 1.5 checkpoints, set `width` and `height` to `512`.
+
+### ollama-stop
+
+Stops a running Ollama model, releasing it from VRAM. Useful between pipeline stages that use different models to avoid out-of-memory failures.
+
+```json
+{ "model": "llama3" }
+```
+
+Requires `ollama` to be installed and available in `PATH`. Wraps `ollama stop <model>`.
 
 ## State management
 

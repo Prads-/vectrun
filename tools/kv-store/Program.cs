@@ -5,6 +5,7 @@ using System.Text.Json;
 // Support both CLI usage (args) and pipeline usage (JSON via stdin)
 string operation, ns, key;
 string? cliValue = null;
+string separator = "\n\n---\n\n";
 
 if (args.Length >= 3)
 {
@@ -18,7 +19,7 @@ else
     var stdin = await Console.In.ReadToEndAsync();
     if (string.IsNullOrWhiteSpace(stdin))
     {
-        Console.Error.WriteLine("Usage: kv-store <read|write|update|delete> <namespace> <key> [value]");
+        Console.Error.WriteLine("Usage: kv-store <read|write|update|delete|append> <namespace> <key> [value]");
         Console.Error.WriteLine("  OR:  echo '{\"operation\":\"write\",\"namespace\":\"ns\",\"key\":\"k\",\"value\":\"v\"}' | kv-store");
         return 1;
     }
@@ -27,6 +28,7 @@ else
     ns        = json.TryGetProperty("namespace", out var nsProp) ? nsProp.GetString() ?? "" : "";
     key       = json.TryGetProperty("key", out var keyProp) ? keyProp.GetString() ?? "" : "";
     cliValue  = json.TryGetProperty("value", out var valProp) ? valProp.GetString() : null;
+    separator = json.TryGetProperty("separator", out var sepProp) ? sepProp.GetString() ?? separator : separator;
 }
 
 if (string.IsNullOrWhiteSpace(operation) || string.IsNullOrWhiteSpace(ns) || string.IsNullOrWhiteSpace(key))
@@ -45,6 +47,7 @@ return operation switch
     "write"  => Write(nsDir, keyFile, cliValue),
     "update" => Update(keyFile, cliValue),
     "delete" => Delete(keyFile),
+    "append" => Append(nsDir, keyFile, cliValue, separator),
     _        => UnknownOperation(operation)
 };
 
@@ -121,9 +124,36 @@ static int Delete(string keyFile)
     }
 }
 
+static int Append(string nsDir, string keyFile, string? value, string separator)
+{
+    if (value is null)
+    {
+        Console.Error.WriteLine("A value is required for the append operation.");
+        return 1;
+    }
+
+    if (!File.Exists(keyFile))
+        return PersistValue(nsDir, keyFile, value);
+
+    try
+    {
+        string existing;
+        using (var fs = new FileStream(keyFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+        using (var sr = new StreamReader(fs, Encoding.UTF8))
+            existing = sr.ReadToEnd();
+
+        return PersistValue(nsDir, keyFile, existing + separator + value);
+    }
+    catch (IOException ex)
+    {
+        Console.Error.WriteLine($"Error appending to key: {ex.Message}");
+        return 1;
+    }
+}
+
 static int UnknownOperation(string operation)
 {
-    Console.Error.WriteLine($"Unknown operation '{operation}'. Must be: read, write, update, delete.");
+    Console.Error.WriteLine($"Unknown operation '{operation}'. Must be: read, write, update, delete, append.");
     return 1;
 }
 

@@ -249,7 +249,10 @@ function LogicForm({ data, onChange }: {
               rows={3}
               className="resize-y rounded-lg border border-slate-200 px-3 py-1.5 font-mono text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
             />
-            <span className="text-xs text-slate-400">If set, this is piped to stdin instead of the previous node's output.</span>
+            <span className="text-xs text-slate-400">
+              If set, this is piped to stdin instead of the previous node's output.
+              Use <span className="font-mono">{'{PREVIOUS_AGENT_OUTPUT}'}</span> anywhere in the value to inject the previous node's output (JSON-escaped, safe to embed in a JSON string).
+            </span>
           </label>
         </>
       )}
