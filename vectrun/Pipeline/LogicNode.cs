@@ -18,7 +18,7 @@ internal class LogicNode : BaseNode<LogicNodeData>
         string? output;
 
         if (Data.LogicType == "process")
-            output = await ExecuteProcess(Data.ProcessPath, context.Input, token);
+            output = await ExecuteProcess(Data.ProcessPath, Data.ProcessInput ?? context.Input, token);
         else if (Data.LogicType == "script")
             output = await ExecuteScript(context.Input, token);
         else

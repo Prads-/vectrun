@@ -241,6 +241,16 @@ function LogicForm({ data, onChange }: {
               </span>
             )}
           </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-slate-500">Process input (optional)</span>
+            <textarea
+              value={data.processInput ?? ''}
+              onChange={e => onChange({ ...data, processInput: e.target.value || undefined })}
+              rows={3}
+              className="resize-y rounded-lg border border-slate-200 px-3 py-1.5 font-mono text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+            <span className="text-xs text-slate-400">If set, this is piped to stdin instead of the previous node's output.</span>
+          </label>
         </>
       )}
       {data.logicType === 'script' && (

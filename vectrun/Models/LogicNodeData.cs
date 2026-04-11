@@ -8,6 +8,7 @@ internal class LogicNodeData : NodeData
     // Process
     public string? ProcessPath { get; set; }
     public string ProcessPathType { get; set; } = "relative"; // "relative" (to pipeline dir) or "absolute"
+    public string? ProcessInput { get; set; }  // if set, piped to stdin instead of the previous node's output
 
     // Script
     public string? ScriptLanguage { get; set; }
