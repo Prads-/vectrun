@@ -42,6 +42,7 @@ interface Props {
   // models
   models: ModelConfig[]
   onModelsChange: (m: ModelConfig[]) => void
+  onModelsSave: (m: ModelConfig[]) => void
   // tools
   tools: ToolConfig[]
   onToolsChange: (t: ToolConfig[]) => void
@@ -49,6 +50,7 @@ interface Props {
   // agents
   agents: AgentConfig[]
   onAgentsChange: (a: AgentConfig[]) => void
+  onAgentsSave: (a: AgentConfig[]) => void
   // run / save
   directory: string
   isRunning: boolean
@@ -62,9 +64,9 @@ export function LeftSidebar({
   activeSection, onSectionChange,
   nodes, selectedNodeId, editingNodeId, pipelineName, startNodeId,
   onSelectNode, onEditNode, onDeleteNode, onNodeDataChange, onPipelineMetaChange, onAddNode,
-  models, onModelsChange,
+  models, onModelsChange, onModelsSave,
   tools, onToolsChange, onToolsSave,
-  agents, onAgentsChange,
+  agents, onAgentsChange, onAgentsSave,
   directory, isRunning, onRun, saveStatus, saveError, onSave,
 }: Props) {
   function toggle(s: SidebarSection) {
@@ -179,7 +181,7 @@ export function LeftSidebar({
               />
             )}
             {activeSection === 'models' && (
-              <ModelsPanel models={models} onChange={onModelsChange} />
+              <ModelsPanel models={models} onChange={onModelsChange} onSave={onModelsSave} />
             )}
             {activeSection === 'agents' && (
               <AgentsPanel
@@ -187,6 +189,7 @@ export function LeftSidebar({
                 models={models}
                 tools={tools}
                 onChange={onAgentsChange}
+                onSave={onAgentsSave}
                 onAddToCanvas={agentId => onAddNode({ nodeType: 'agent', agentId })}
               />
             )}

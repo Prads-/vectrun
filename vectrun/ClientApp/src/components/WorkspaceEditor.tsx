@@ -204,14 +204,16 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
     if (editingNodeId === nodeId) setEditingNodeId(null)
   }
 
-  async function handleSave(toolsOverride?: ToolConfig[]) {
+  async function handleSave(overrides?: { tools?: ToolConfig[], models?: ModelConfig[], agents?: AgentConfig[] }) {
     setSaveStatus('saving')
     setSaveError(null)
     try {
-      const effectiveTools = toolsOverride ?? tools
+      const effectiveTools   = overrides?.tools   ?? tools
+      const effectiveModels  = overrides?.models  ?? models
+      const effectiveAgents  = overrides?.agents  ?? agents
       const pipeline = toPipeline(nodes, edges, { pipelineName, startNodeId })
-      await saveWorkspace(directory, pipeline, models, effectiveTools, agents)
-      onSaved({ pipeline, models, tools: effectiveTools, agents })
+      await saveWorkspace(directory, pipeline, effectiveModels, effectiveTools, effectiveAgents)
+      onSaved({ pipeline, models: effectiveModels, tools: effectiveTools, agents: effectiveAgents })
       setSaveStatus('saved')
       setTimeout(() => setSaveStatus('idle'), 2000)
     } catch (err) {
@@ -220,9 +222,19 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
     }
   }
 
-  function handleSaveTools(updatedTools: ToolConfig[]) {
-    setTools(updatedTools)
-    handleSave(updatedTools)
+  function handleSaveTools(updated: ToolConfig[]) {
+    setTools(updated)
+    handleSave({ tools: updated })
+  }
+
+  function handleSaveModels(updated: ModelConfig[]) {
+    setModels(updated)
+    handleSave({ models: updated })
+  }
+
+  function handleSaveAgents(updated: AgentConfig[]) {
+    setAgents(updated)
+    handleSave({ agents: updated })
   }
 
   async function handleRun(input: string) {
@@ -266,11 +278,13 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
         onAddNode={addNodeAtCenter}
         models={models}
         onModelsChange={setModels}
+        onModelsSave={handleSaveModels}
         tools={tools}
         onToolsChange={setTools}
         onToolsSave={handleSaveTools}
         agents={agents}
         onAgentsChange={setAgents}
+        onAgentsSave={handleSaveAgents}
         directory={directory}
         isRunning={isRunning}
         onRun={handleRun}

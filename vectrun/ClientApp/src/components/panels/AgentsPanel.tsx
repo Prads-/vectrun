@@ -8,6 +8,7 @@ interface Props {
   models: ModelConfig[]
   tools: ToolConfig[]
   onChange: (agents: AgentConfig[]) => void
+  onSave: (agents: AgentConfig[]) => void
   onAddToCanvas?: (agentId: string) => void
 }
 
@@ -20,7 +21,7 @@ const emptyAgent = (): AgentConfig => ({
   toolIds: [],
 })
 
-export function AgentsPanel({ agents, models, tools, onChange, onAddToCanvas }: Props) {
+export function AgentsPanel({ agents, models, tools, onChange, onSave, onAddToCanvas }: Props) {
   const [selected, setSelected] = useState<AgentConfig | null>(null)
   const [isNew, setIsNew] = useState(false)
   const [form, setForm] = useState<AgentConfig>(emptyAgent())
@@ -49,17 +50,19 @@ export function AgentsPanel({ agents, models, tools, onChange, onAddToCanvas }: 
       prompt: form.prompt || undefined,
       toolIds: form.toolIds && form.toolIds.length > 0 ? form.toolIds : undefined,
     }
-    if (isNew) {
-      onChange([...agents, cleaned])
-    } else {
-      onChange(agents.map(a => a.agentName === selected?.agentName ? cleaned : a))
-    }
+    const updated = isNew
+      ? [...agents, cleaned]
+      : agents.map(a => a.agentName === selected?.agentName ? cleaned : a)
+    onChange(updated)
     cancelEdit()
+    onSave(updated)
   }
 
   function deleteAgent(name: string) {
-    onChange(agents.filter(a => a.agentName !== name))
+    const updated = agents.filter(a => a.agentName !== name)
+    onChange(updated)
     if (selected?.agentName === name) cancelEdit()
+    onSave(updated)
   }
 
   function toggleTool(toolName: string) {

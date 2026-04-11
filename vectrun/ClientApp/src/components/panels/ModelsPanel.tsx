@@ -4,6 +4,7 @@ import type { ModelConfig } from '../../types/workspace'
 interface Props {
   models: ModelConfig[]
   onChange: (models: ModelConfig[]) => void
+  onSave: (models: ModelConfig[]) => void
 }
 
 const MODEL_TYPES: ModelConfig['type'][] = ['ollama', 'vllm', 'llama.cpp', 'open_ai', 'anthropic']
@@ -16,7 +17,7 @@ const emptyModel = (): ModelConfig => ({
   apiKey: '',
 })
 
-export function ModelsPanel({ models, onChange }: Props) {
+export function ModelsPanel({ models, onChange, onSave }: Props) {
   const [selected, setSelected] = useState<ModelConfig | null>(null)
   const [isNew, setIsNew] = useState(false)
   const [form, setForm] = useState<ModelConfig>(emptyModel())
@@ -39,17 +40,19 @@ export function ModelsPanel({ models, onChange }: Props) {
   }
 
   function saveForm() {
-    if (isNew) {
-      onChange([...models, form])
-    } else {
-      onChange(models.map(m => m.id === selected?.id ? form : m))
-    }
+    const updated = isNew
+      ? [...models, form]
+      : models.map(m => m.id === selected?.id ? form : m)
+    onChange(updated)
     cancelEdit()
+    onSave(updated)
   }
 
   function deleteModel(id: string) {
-    onChange(models.filter(m => m.id !== id))
+    const updated = models.filter(m => m.id !== id)
+    onChange(updated)
     if (selected?.id === id) cancelEdit()
+    onSave(updated)
   }
 
   const showForm = isNew || selected !== null
