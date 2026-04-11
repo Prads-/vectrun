@@ -17,6 +17,13 @@ public class PipelinesController(
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
+    [HttpPost("pipelines/stop")]
+    public IActionResult StopPipeline()
+    {
+        runService.Stop();
+        return Ok();
+    }
+
     [HttpGet("pipeline")]
     public IActionResult GetPipeline([FromQuery] string directory) =>
         Content(workspaceService.GetPipelineJson(directory), "application/json");

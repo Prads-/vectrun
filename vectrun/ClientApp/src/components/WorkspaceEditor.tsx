@@ -8,7 +8,7 @@ import type { LogEntry } from '../types/console'
 import { buildFlowGraph, reLayout } from '../lib/layoutGraph'
 import { toPipeline } from '../lib/pipelineConvert'
 import { saveWorkspace } from '../api/workspace'
-import { streamRun, ConflictError } from '../api/pipeline'
+import { streamRun, stopRun, ConflictError } from '../api/pipeline'
 import { PipelineCanvas } from './PipelineCanvas'
 import { LeftSidebar } from './LeftSidebar'
 import type { SidebarSection } from './LeftSidebar'
@@ -55,6 +55,7 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [consoleOpen, setConsoleOpen] = useState(false)
+  const runAbortRef = useRef<AbortController | null>(null)
 
   // Ref to the canvas wrapper — used to compute center position for click-to-add
   const canvasWrapRef = useRef<HTMLDivElement>(null)
@@ -238,11 +239,13 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
   }
 
   async function handleRun(input: string) {
+    const ac = new AbortController()
+    runAbortRef.current = ac
     setLogs([])
     setIsRunning(true)
     setConsoleOpen(true)
     try {
-      for await (const entry of streamRun(directory, input || undefined)) {
+      for await (const entry of streamRun(directory, input || undefined, ac.signal)) {
         setLogs(prev => [...prev, entry])
       }
     } catch (err) {
@@ -256,8 +259,14 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
         message: msg,
       }])
     } finally {
+      runAbortRef.current = null
       setIsRunning(false)
     }
+  }
+
+  function handleStop() {
+    runAbortRef.current?.abort()
+    stopRun()
   }
 
   return (
@@ -287,6 +296,7 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
         onAgentsSave={handleSaveAgents}
         isRunning={isRunning}
         onRun={handleRun}
+        onStop={handleStop}
         saveStatus={saveStatus}
         saveError={saveError}
         onSave={handleSave}

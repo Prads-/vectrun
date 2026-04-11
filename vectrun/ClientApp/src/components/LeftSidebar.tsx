@@ -1,3 +1,4 @@
+import { useRef, useState, useCallback } from 'react'
 import type { AnyFlowNode } from '../lib/layoutGraph'
 import type { AnyNodeData } from '../types/pipeline'
 import type { ModelConfig, ToolConfig, AgentConfig } from '../types/workspace'
@@ -54,6 +55,7 @@ interface Props {
   // run / save
   isRunning: boolean
   onRun: (input: string) => void
+  onStop: () => void
   saveStatus: 'idle' | 'saving' | 'saved' | 'error'
   saveError: string | null
   onSave: () => void
@@ -66,8 +68,38 @@ export function LeftSidebar({
   models, onModelsChange, onModelsSave,
   tools, onToolsChange, onToolsSave,
   agents, onAgentsChange, onAgentsSave,
-  isRunning, onRun, saveStatus, saveError, onSave,
+  isRunning, onRun, onStop, saveStatus, saveError, onSave,
 }: Props) {
+  const [panelWidth, setPanelWidth] = useState(() => {
+    const saved = localStorage.getItem('vectrun_sidebar_width')
+    return saved ? Math.max(200, Math.min(600, parseInt(saved, 10))) : 288
+  })
+  const dragStartX = useRef(0)
+  const dragStartWidth = useRef(0)
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragStartX.current = e.clientX
+    dragStartWidth.current = panelWidth
+
+    function onMove(ev: MouseEvent) {
+      const next = Math.max(200, Math.min(600, dragStartWidth.current + ev.clientX - dragStartX.current))
+      setPanelWidth(next)
+      localStorage.setItem('vectrun_sidebar_width', String(next))
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'ew-resize'
+    document.body.style.userSelect = 'none'
+  }, [panelWidth])
+
   function toggle(s: SidebarSection) {
     onSectionChange(activeSection === s ? null : s)
   }
@@ -146,7 +178,7 @@ export function LeftSidebar({
 
       {/* Content panel */}
       {activeSection && (
-        <div className="flex w-72 shrink-0 flex-col border-r border-slate-200 bg-white overflow-hidden panel-enter">
+        <div className="flex shrink-0 flex-col border-r border-slate-200 bg-white overflow-hidden panel-enter relative" style={{ width: panelWidth }}>
           {/* Panel header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 shrink-0">
             <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
@@ -202,10 +234,17 @@ export function LeftSidebar({
                     Save error: {saveError}
                   </div>
                 )}
-                <RunPanel isRunning={isRunning} onRun={onRun} />
+                <RunPanel isRunning={isRunning} onRun={onRun} onStop={onStop} />
               </div>
             )}
           </div>
+
+          {/* Resize handle on the right edge */}
+          <div
+            onMouseDown={handleResizeStart}
+            className="absolute right-0 top-0 h-full w-1 cursor-ew-resize bg-transparent hover:bg-sky-400/40 transition-colors"
+            title="Drag to resize"
+          />
         </div>
       )}
     </div>

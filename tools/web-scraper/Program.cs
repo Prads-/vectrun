@@ -3,16 +3,19 @@ using Microsoft.Playwright;
 
 // Support both CLI usage (args[0]) and pipeline usage (JSON via stdin)
 string url;
+bool extractText = false;
+
 if (args.Length > 0)
 {
     url = args[0];
+    extractText = args.Length > 1 && args[1].Equals("--extract-text", StringComparison.OrdinalIgnoreCase);
 }
 else
 {
     var stdin = await Console.In.ReadToEndAsync();
     if (string.IsNullOrWhiteSpace(stdin))
     {
-        Console.Error.WriteLine("Usage: web-scraper <url>  OR  echo '{\"url\":\"...\"}' | web-scraper");
+        Console.Error.WriteLine("Usage: web-scraper <url> [--extract-text]  OR  echo '{\"url\":\"...\"}' | web-scraper");
         return 1;
     }
     var json = JsonSerializer.Deserialize<JsonElement>(stdin);
@@ -22,6 +25,7 @@ else
         return 1;
     }
     url = urlProp.GetString() ?? string.Empty;
+    extractText = json.TryGetProperty("extractText", out var et) && et.ValueKind == JsonValueKind.True;
 }
 
 if (string.IsNullOrWhiteSpace(url))
@@ -79,7 +83,23 @@ try
 }
 catch (TimeoutException) { /* best-effort — content already loaded */ }
 
-var html = await page.ContentAsync();
-Console.WriteLine(html);
+if (extractText)
+{
+    // Remove noise elements from the live DOM before extracting text.
+    // script/style/noscript contain code or hidden text; template elements are inert.
+    // Working on the live DOM is fine in a headless context.
+    // Note: innerText is layout-dependent and only works on attached nodes, so we
+    // cannot use it on a cloneNode — we strip in-place instead.
+    var text = await page.EvaluateAsync<string>(@"() => {
+        document.querySelectorAll('script, style, noscript, template').forEach(e => e.remove());
+        return document.body.innerText;
+    }");
+    Console.WriteLine(text);
+}
+else
+{
+    var html = await page.ContentAsync();
+    Console.WriteLine(html);
+}
 
 return 0;

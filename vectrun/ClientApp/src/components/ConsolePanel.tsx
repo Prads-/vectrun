@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import type { LogEntry, LogEvent } from '../types/console'
 
 interface Props {
@@ -11,12 +11,12 @@ interface Props {
 
 // ── Styling helpers ────────────────────────────────────────────────────────
 
-const NODE_TYPE_STYLE: Record<string, { dot: string; badge: string }> = {
-  agent:  { dot: 'bg-blue-400',    badge: 'bg-blue-900/60 text-blue-300 border-blue-700' },
-  branch: { dot: 'bg-amber-400',   badge: 'bg-amber-900/60 text-amber-300 border-amber-700' },
-  logic:  { dot: 'bg-emerald-400', badge: 'bg-emerald-900/60 text-emerald-300 border-emerald-700' },
-  wait:   { dot: 'bg-violet-400',  badge: 'bg-violet-900/60 text-violet-300 border-violet-700' },
-  system: { dot: 'bg-slate-500',   badge: 'bg-slate-800 text-slate-400 border-slate-600' },
+const NODE_TYPE_STYLE: Record<string, { dot: string; badge: string; check: string }> = {
+  agent:  { dot: 'bg-blue-400',    badge: 'bg-blue-900/60 text-blue-300 border-blue-700',       check: 'accent-blue-400' },
+  branch: { dot: 'bg-amber-400',   badge: 'bg-amber-900/60 text-amber-300 border-amber-700',     check: 'accent-amber-400' },
+  logic:  { dot: 'bg-emerald-400', badge: 'bg-emerald-900/60 text-emerald-300 border-emerald-700', check: 'accent-emerald-400' },
+  wait:   { dot: 'bg-violet-400',  badge: 'bg-violet-900/60 text-violet-300 border-violet-700',  check: 'accent-violet-400' },
+  system: { dot: 'bg-slate-500',   badge: 'bg-slate-800 text-slate-400 border-slate-600',        check: 'accent-slate-400' },
 }
 
 const EVENT_STYLE: Record<LogEvent, { label: string; color: string }> = {
@@ -43,9 +43,46 @@ function formatTime(iso: string) {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function ConsolePanel({ logs, isRunning, open, onToggle, onClear }: Props) {
-  const [filterNodeId, setFilterNodeId] = useState<string>('all')
+  // Empty set = show all; non-empty = show only those node IDs
+  const [includedNodeIds, setIncludedNodeIds] = useState<Set<string>>(new Set())
+  const [filterOpen, setFilterOpen] = useState(false)
   const [autoScroll, setAutoScroll] = useState(true)
+  const [panelHeight, setPanelHeight] = useState(() => {
+    const saved = localStorage.getItem('vectrun_console_height')
+    return saved ? Math.max(120, Math.min(800, parseInt(saved, 10))) : 260
+  })
   const scrollRef = useRef<HTMLDivElement>(null)
+  const filterRef = useRef<HTMLDivElement>(null)
+  const dragStartY = useRef<number>(0)
+  const dragStartHeight = useRef<number>(0)
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragStartY.current = e.clientY
+    dragStartHeight.current = panelHeight
+
+    function onMove(ev: MouseEvent) {
+      const delta = dragStartY.current - ev.clientY
+      const next = Math.max(120, Math.min(800, dragStartHeight.current + delta))
+      setPanelHeight(next)
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    document.body.style.cursor = 'ns-resize'
+    document.body.style.userSelect = 'none'
+  }, [panelHeight])
+
+  // Persist height to localStorage
+  useEffect(() => {
+    localStorage.setItem('vectrun_console_height', String(panelHeight))
+  }, [panelHeight])
 
   // Collect unique nodes that have appeared in logs
   const nodeOptions = useMemo(() => {
@@ -60,8 +97,23 @@ export function ConsolePanel({ logs, isRunning, open, onToggle, onClear }: Props
 
   // Reset filter when logs are cleared
   useEffect(() => {
-    if (logs.length === 0) setFilterNodeId('all')
+    if (logs.length === 0) {
+      setIncludedNodeIds(new Set())
+      setFilterOpen(false)
+    }
   }, [logs.length])
+
+  // Close filter dropdown on outside click
+  useEffect(() => {
+    if (!filterOpen) return
+    function handleClick(e: MouseEvent) {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+        setFilterOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [filterOpen])
 
   // Auto-scroll to bottom when new entries arrive
   useEffect(() => {
@@ -77,17 +129,53 @@ export function ConsolePanel({ logs, isRunning, open, onToggle, onClear }: Props
     setAutoScroll(atBottom)
   }
 
-  const visibleLogs = filterNodeId === 'all'
+  function toggleNode(id: string) {
+    setIncludedNodeIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function selectAll() {
+    setIncludedNodeIds(new Set())
+  }
+
+  function clearAll() {
+    setIncludedNodeIds(new Set(nodeOptions.map(n => n.id)))
+  }
+
+  const isFiltered = includedNodeIds.size > 0
+  const allSelected = !isFiltered
+  const selectedCount = isFiltered
+    ? includedNodeIds.size
+    : nodeOptions.length
+
+  const visibleLogs = !isFiltered
     ? logs
-    : logs.filter(l => l.nodeId === filterNodeId)
+    : logs.filter(l => includedNodeIds.has(l.nodeId))
+
+  const filterLabel = allSelected
+    ? 'All nodes'
+    : `${selectedCount} of ${nodeOptions.length} nodes`
 
   return (
     <div
-      className="shrink-0 flex flex-col border-t border-slate-700 bg-slate-950"
-      style={{ height: open ? 260 : 34 }}
+      className="shrink-0 flex flex-col bg-slate-950"
+      style={{ height: open ? panelHeight : 34 }}
     >
+      {/* Resize handle — only shown when open */}
+      {open && (
+        <div
+          onMouseDown={handleResizeStart}
+          className="h-1 shrink-0 cursor-ns-resize bg-slate-800 hover:bg-sky-500/60 transition-colors"
+          title="Drag to resize"
+        />
+      )}
+
       {/* Header bar */}
-      <div className="flex h-[34px] shrink-0 items-center gap-3 px-3 border-b border-slate-800">
+      <div className="flex h-[34px] shrink-0 items-center gap-3 px-3 border-t border-b border-slate-800">
         {/* Title + running indicator */}
         <button
           onClick={onToggle}
@@ -108,23 +196,76 @@ export function ConsolePanel({ logs, isRunning, open, onToggle, onClear }: Props
           )}
         </button>
 
-        {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Node filter */}
-        {logs.length > 0 && open && (
-          <select
-            value={filterNodeId}
-            onChange={e => setFilterNodeId(e.target.value)}
-            className="rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs text-slate-300 focus:outline-none focus:border-slate-500 cursor-pointer"
-          >
-            <option value="all">All nodes</option>
-            {nodeOptions.map(n => (
-              <option key={n.id} value={n.id}>
-                {n.name ? `${n.name} (${n.id})` : n.id}
-              </option>
-            ))}
-          </select>
+        {/* Multi-node filter */}
+        {logs.length > 0 && open && nodeOptions.length > 0 && (
+          <div ref={filterRef} className="relative">
+            <button
+              onClick={() => setFilterOpen(o => !o)}
+              className={`flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs transition ${
+                isFiltered
+                  ? 'border-sky-700 bg-sky-900/40 text-sky-300'
+                  : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500'
+              }`}
+            >
+              <FilterIcon />
+              {filterLabel}
+              <ChevronUpIcon />
+            </button>
+
+            {filterOpen && (
+              <div className="absolute bottom-full right-0 mb-1 w-56 rounded-lg border border-slate-700 bg-slate-900 shadow-xl z-50 overflow-hidden">
+                {/* Select all / Clear header */}
+                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Filter nodes</span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={selectAll}
+                      className="text-[10px] text-slate-400 hover:text-slate-200 transition"
+                    >
+                      All
+                    </button>
+                    <span className="text-slate-700">·</span>
+                    <button
+                      onClick={clearAll}
+                      className="text-[10px] text-slate-400 hover:text-slate-200 transition"
+                    >
+                      None
+                    </button>
+                  </div>
+                </div>
+
+                {/* Node list */}
+                <div className="max-h-48 overflow-y-auto py-1">
+                  {nodeOptions.map(n => {
+                    const ns = nodeStyle(n.type)
+                    const checked = !isFiltered || includedNodeIds.has(n.id)
+                    return (
+                      <label
+                        key={n.id}
+                        className="flex items-center gap-2.5 px-3 py-1.5 cursor-pointer hover:bg-slate-800 transition"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleNode(n.id)}
+                          className={`rounded ${ns.check} shrink-0`}
+                        />
+                        <span className={`inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10px] font-semibold shrink-0 ${ns.badge}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${ns.dot}`} />
+                          {n.type}
+                        </span>
+                        <span className="text-xs text-slate-300 truncate">
+                          {n.name ?? n.id}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {/* Clear */}
@@ -144,7 +285,7 @@ export function ConsolePanel({ logs, isRunning, open, onToggle, onClear }: Props
           className="rounded-md p-0.5 text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition"
           title={open ? 'Collapse' : 'Expand'}
         >
-          {open ? <ChevronDownIcon /> : <ChevronUpIcon />}
+          {open ? <ChevronDownIcon /> : <ChevronUpSmallIcon />}
         </button>
       </div>
 
@@ -181,29 +322,20 @@ function LogRow({ entry }: { entry: LogEntry }) {
   return (
     <div className="flex flex-col py-0.5 gap-0">
       <div className="flex items-baseline gap-2 text-xs leading-5">
-        {/* Timestamp */}
         <span className="shrink-0 text-slate-600 tabular-nums">
           {formatTime(entry.timestamp)}
         </span>
-
-        {/* Node badge */}
         <span className={`shrink-0 inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10px] font-semibold ${ns.badge}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${ns.dot}`} />
           {label}
         </span>
-
-        {/* Event label */}
         <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${ev.color}`}>
           {ev.label}
         </span>
-
-        {/* Inline message for short single-line values */}
         {entry.message && !entry.message.includes('\n') && entry.message.length <= 120 && (
           <span className="text-slate-300 truncate">{entry.message}</span>
         )}
       </div>
-
-      {/* Multi-line or long message on its own line */}
       {entry.message && (entry.message.includes('\n') || entry.message.length > 120) && (
         <pre className="mt-0.5 ml-[calc(6.5rem+8px)] whitespace-pre-wrap break-all text-[11px] text-slate-300 leading-relaxed">
           {entry.message}
@@ -223,7 +355,23 @@ function TerminalIcon() {
   )
 }
 
+function FilterIcon() {
+  return (
+    <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V17a1 1 0 01-.553.894l-4-2A1 1 0 017 15v-4.586L3.293 6.707A1 1 0 013 6V3z" clipRule="evenodd" />
+    </svg>
+  )
+}
+
 function ChevronUpIcon() {
+  return (
+    <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />
+    </svg>
+  )
+}
+
+function ChevronUpSmallIcon() {
   return (
     <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
       <path fillRule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clipRule="evenodd" />

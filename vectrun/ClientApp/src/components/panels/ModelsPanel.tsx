@@ -58,8 +58,8 @@ export function ModelsPanel({ models, onChange, onSave }: Props) {
   const showForm = isNew || selected !== null
 
   return (
-    <div className="flex h-full flex-col gap-4 p-4">
-      <div className="flex items-center justify-between">
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between px-4 pt-4 pb-3 shrink-0">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Models</p>
         <button
           onClick={startNew}
@@ -69,7 +69,9 @@ export function ModelsPanel({ models, onChange, onSave }: Props) {
         </button>
       </div>
 
-      <div className="flex flex-col gap-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
+      <div className="flex flex-col gap-4 px-4 pb-4">
+      <div className="flex flex-col gap-1">
         {models.length === 0 && !showForm && (
           <p className="text-xs text-slate-400 italic">No models configured.</p>
         )}
@@ -95,7 +97,7 @@ export function ModelsPanel({ models, onChange, onSave }: Props) {
       </div>
 
       {showForm && (
-        <div className="flex flex-col gap-3 border-t border-slate-100 pt-4">
+        <div className="flex flex-col gap-3 border-t border-slate-100 pt-4 overflow-hidden">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
             {isNew ? 'New model' : 'Edit model'}
           </p>
@@ -152,6 +154,8 @@ export function ModelsPanel({ models, onChange, onSave }: Props) {
           </div>
         </div>
       )}
+      </div>
+      </div>
     </div>
   )
 }

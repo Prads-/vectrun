@@ -26,18 +26,25 @@ Fetches the full HTML content of a web page using a headless Chromium browser (P
 ### CLI
 
 ```bash
-web-scraper <url>
+web-scraper <url> [--extract-text]
 ```
 
 ### Pipeline (stdin JSON)
 
 ```json
-{ "url": "https://store.steampowered.com/charts/topselling/" }
+{ "url": "https://store.steampowered.com/charts/topselling/", "extractText": true }
 ```
+
+| Field         | Required | Default | Description                                                   |
+|---------------|----------|---------|---------------------------------------------------------------|
+| `url`         | Yes      | —       | The page URL to fetch                                         |
+| `extractText` | No       | `false` | When `true`, returns visible text only (strips HTML/CSS/JS)   |
 
 ### Output
 
-The full HTML of the page written to stdout.
+When `extractText` is omitted or `false`: the full raw HTML of the page.
+
+When `extractText` is `true`: the visible rendered text of the page body, with all HTML tags, `<script>`, and `<style>` blocks removed. Equivalent to `document.body.innerText` in the browser.
 
 ### Notes
 

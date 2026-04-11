@@ -12,18 +12,26 @@ export async function loadPipeline(directory: string): Promise<Pipeline> {
 
 export class ConflictError extends Error {}
 
+/** Cancels the currently running pipeline on the server. */
+export async function stopRun(): Promise<void> {
+  await fetch('/api/pipelines/stop', { method: 'POST' })
+}
+
 /**
  * Starts a pipeline run and yields log entries as they stream in via SSE.
  * The generator completes when the run finishes or the stream closes.
+ * Pass an AbortSignal to cancel the stream from the client side.
  */
 export async function* streamRun(
   directory: string,
-  input?: string
+  input?: string,
+  signal?: AbortSignal
 ): AsyncGenerator<LogEntry> {
   const res = await fetch('/api/pipelines/run/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ directory, input: input || null }),
+    signal,
   })
 
   if (res.status === 409) throw new ConflictError('A pipeline run is already in progress.')
@@ -52,6 +60,9 @@ export async function* streamRun(
         }
       }
     }
+  } catch (err) {
+    // AbortError means the caller deliberately stopped the stream — not an error.
+    if ((err as Error).name !== 'AbortError') throw err
   } finally {
     reader.releaseLock()
   }
