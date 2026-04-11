@@ -80,12 +80,6 @@ static int Write(string nsDir, string keyFile, string? value)
         return 1;
     }
 
-    if (File.Exists(keyFile))
-    {
-        Console.Error.WriteLine("Key already exists. Use 'update' to overwrite.");
-        return 1;
-    }
-
     return PersistValue(nsDir, keyFile, value);
 }
 
