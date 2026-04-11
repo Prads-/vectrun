@@ -11,7 +11,9 @@ export function AgentNode({ data, id, selected }: NodeProps<AgentFlowNode>) {
         ? 'border-2 border-blue-500 shadow-lg shadow-blue-100/60'
         : 'border border-blue-200 shadow-sm hover:shadow-md'
     }`}>
-      <Handle type="target" position={Position.Top} className="!bg-blue-400 !w-3 !h-3 !border-2 !border-white" />
+      <Handle type="source" position={Position.Top}    className="node-handle !bg-blue-400" />
+      <Handle type="source" position={Position.Left}   className="node-handle !bg-blue-400" />
+      <Handle type="source" position={Position.Right}  className="node-handle !bg-blue-400" />
       <div className="rounded-t-[11px] bg-gradient-to-br from-blue-500 to-blue-600 px-3 py-1.5 flex items-center gap-2">
         <span className="text-[10px] font-semibold text-white/70 uppercase tracking-widest">Agent</span>
         <span className="ml-auto font-mono text-[10px] text-blue-200/80">{id}</span>
@@ -30,7 +32,7 @@ export function AgentNode({ data, id, selected }: NodeProps<AgentFlowNode>) {
           </p>
         )}
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-blue-400 !w-3 !h-3 !border-2 !border-white" />
+      <Handle type="source" position={Position.Bottom} className="node-handle !bg-blue-400" />
     </div>
   )
 }

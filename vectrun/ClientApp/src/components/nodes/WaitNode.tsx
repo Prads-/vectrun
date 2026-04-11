@@ -11,7 +11,9 @@ export function WaitNode({ data, id, selected }: NodeProps<WaitFlowNode>) {
         ? 'border-2 border-violet-500 shadow-lg shadow-violet-100/60'
         : 'border border-violet-200 shadow-sm hover:shadow-md'
     }`}>
-      <Handle type="target" position={Position.Top} className="!bg-violet-400 !w-3 !h-3 !border-2 !border-white" />
+      <Handle type="source" position={Position.Top}    className="node-handle !bg-violet-400" />
+      <Handle type="source" position={Position.Left}   className="node-handle !bg-violet-400" />
+      <Handle type="source" position={Position.Right}  className="node-handle !bg-violet-400" />
       <div className="rounded-t-[11px] bg-gradient-to-br from-violet-500 to-violet-600 px-3 py-1.5 flex items-center gap-2">
         <span className="text-[10px] font-semibold text-white/70 uppercase tracking-widest">Wait</span>
         <span className="ml-auto font-mono text-[10px] text-violet-200/80">{id}</span>
@@ -23,7 +25,7 @@ export function WaitNode({ data, id, selected }: NodeProps<WaitFlowNode>) {
         }
         <p className="mt-0.5 text-xs text-slate-500 font-mono">{data.durationMs.toLocaleString()} ms</p>
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-violet-400 !w-3 !h-3 !border-2 !border-white" />
+      <Handle type="source" position={Position.Bottom} className="node-handle !bg-violet-400" />
     </div>
   )
 }

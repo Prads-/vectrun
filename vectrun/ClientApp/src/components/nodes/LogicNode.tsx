@@ -11,7 +11,9 @@ export function LogicNode({ data, id, selected }: NodeProps<LogicFlowNode>) {
         ? 'border-2 border-emerald-500 shadow-lg shadow-emerald-100/60'
         : 'border border-emerald-200 shadow-sm hover:shadow-md'
     }`}>
-      <Handle type="target" position={Position.Top} className="!bg-emerald-400 !w-3 !h-3 !border-2 !border-white" />
+      <Handle type="source" position={Position.Top}    className="node-handle !bg-emerald-400" />
+      <Handle type="source" position={Position.Left}   className="node-handle !bg-emerald-400" />
+      <Handle type="source" position={Position.Right}  className="node-handle !bg-emerald-400" />
       <div className="rounded-t-[11px] bg-gradient-to-br from-emerald-500 to-emerald-600 px-3 py-1.5 flex items-center gap-2">
         <span className="text-[10px] font-semibold text-white/70 uppercase tracking-widest">Logic</span>
         <span className="ml-auto font-mono text-[10px] text-emerald-200/80">{id}</span>
@@ -28,7 +30,7 @@ export function LogicNode({ data, id, selected }: NodeProps<LogicFlowNode>) {
           <p className="mt-0.5 text-xs text-slate-400 truncate font-mono">{data.processPath}</p>
         )}
       </div>
-      <Handle type="source" position={Position.Bottom} className="!bg-emerald-400 !w-3 !h-3 !border-2 !border-white" />
+      <Handle type="source" position={Position.Bottom} className="node-handle !bg-emerald-400" />
     </div>
   )
 }

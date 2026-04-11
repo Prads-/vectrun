@@ -23,3 +23,17 @@
 .panel-enter {
   animation: panel-enter 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
+
+/* Handles: hidden until the node is hovered or selected */
+.node-handle {
+  width: 10px !important;
+  height: 10px !important;
+  border: 2px solid white !important;
+  border-radius: 50% !important;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.react-flow__node:hover .node-handle,
+.react-flow__node.selected .node-handle {
+  opacity: 1;
+}

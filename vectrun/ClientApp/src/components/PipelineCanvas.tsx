@@ -5,13 +5,16 @@ import {
   MiniMap,
   BackgroundVariant,
   Panel,
+  ConnectionMode,
+  MarkerType,
 } from '@xyflow/react'
-import type { NodeTypes, OnNodesChange, OnEdgesChange, Edge, Connection } from '@xyflow/react'
+import type { NodeTypes, EdgeTypes, OnNodesChange, OnEdgesChange, Edge, Connection } from '@xyflow/react'
 import type { AnyFlowNode } from '../lib/layoutGraph'
 import { AgentNode } from './nodes/AgentNode'
 import { BranchNode } from './nodes/BranchNode'
 import { LogicNode } from './nodes/LogicNode'
 import { WaitNode } from './nodes/WaitNode'
+import { FloatingEdge } from './edges/FloatingEdge'
 
 const nodeTypes = {
   agent: AgentNode,
@@ -19,6 +22,16 @@ const nodeTypes = {
   logic: LogicNode,
   wait: WaitNode,
 } satisfies NodeTypes
+
+const edgeTypes = {
+  floating: FloatingEdge,
+} satisfies EdgeTypes
+
+const defaultEdgeOptions = {
+  type: 'floating',
+  style: { stroke: '#94a3b8', strokeWidth: 1.5 },
+  markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' },
+}
 
 interface Props {
   nodes: AnyFlowNode[]
@@ -30,6 +43,7 @@ interface Props {
   onPaneClick: () => void
   onDrop: (e: React.DragEvent) => void
   onDragOver: (e: React.DragEvent) => void
+  onAutoLayout: () => void
 }
 
 export function PipelineCanvas({
@@ -42,6 +56,7 @@ export function PipelineCanvas({
   onPaneClick,
   onDrop,
   onDragOver,
+  onAutoLayout,
 }: Props) {
   return (
     // absolute inset-0 ensures ReactFlow always fills its relative parent
@@ -51,6 +66,9 @@ export function PipelineCanvas({
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        defaultEdgeOptions={defaultEdgeOptions}
+        connectionMode={ConnectionMode.Loose}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
@@ -77,6 +95,16 @@ export function PipelineCanvas({
           }}
           maskColor="rgba(248,250,252,0.7)"
         />
+        <Panel position="top-right">
+          <button
+            onClick={onAutoLayout}
+            title="Auto-layout graph"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50 hover:text-slate-800 transition"
+          >
+            <LayoutIcon />
+            Layout
+          </button>
+        </Panel>
         {nodes.length === 0 && (
           <Panel position="top-center">
             <div className="mt-16 flex flex-col items-center gap-2 select-none pointer-events-none">
@@ -92,5 +120,17 @@ export function PipelineCanvas({
         )}
       </ReactFlow>
     </div>
+  )
+}
+
+function LayoutIcon() {
+  return (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="5" rx="1" />
+      <rect x="14" y="3" width="7" height="5" rx="1" />
+      <rect x="7" y="13" width="10" height="5" rx="1" />
+      <path d="M6.5 8v2.5a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2V8" />
+      <line x1="12" y1="10.5" x2="12" y2="13" />
+    </svg>
   )
 }

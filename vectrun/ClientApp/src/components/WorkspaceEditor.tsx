@@ -5,7 +5,7 @@ import type { Workspace, ModelConfig, ToolConfig, AgentConfig } from '../types/w
 import type { AnyNodeData, AgentNodeData, BranchNodeData, LogicNodeData, WaitNodeData } from '../types/pipeline'
 import type { AnyFlowNode } from '../lib/layoutGraph'
 import type { LogEntry } from '../types/console'
-import { buildFlowGraph } from '../lib/layoutGraph'
+import { buildFlowGraph, reLayout } from '../lib/layoutGraph'
 import { toPipeline } from '../lib/pipelineConvert'
 import { saveWorkspace } from '../api/workspace'
 import { streamRun, ConflictError } from '../api/pipeline'
@@ -66,10 +66,7 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
         setPendingConnection(connection)
       } else {
         setEdges(eds =>
-          addEdge(
-            { ...connection, style: { stroke: '#94a3b8', strokeWidth: 1.5 }, animated: false },
-            eds
-          )
+          addEdge({ ...connection }, eds)
         )
       }
     },
@@ -83,7 +80,6 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
         {
           ...pendingConnection,
           label,
-          style: { stroke: '#94a3b8', strokeWidth: 1.5 },
           labelStyle: { fontSize: 10, fill: '#64748b', fontWeight: 600 },
           labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.95 },
           labelBgPadding: [4, 2] as [number, number],
@@ -237,6 +233,10 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
     handleSave({ agents: updated })
   }
 
+  function handleAutoLayout() {
+    setNodes(nds => reLayout(nds, edges))
+  }
+
   async function handleRun(input: string) {
     setLogs([])
     setIsRunning(true)
@@ -304,6 +304,7 @@ function WorkspaceEditorInner({ workspace, directory, onSaved }: Props) {
             onPaneClick={handlePaneClick}
             onDrop={handleCanvasDrop}
             onDragOver={handleCanvasDragOver}
+            onAutoLayout={handleAutoLayout}
           />
         </div>
 

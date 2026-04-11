@@ -1,4 +1,5 @@
 import dagre from '@dagrejs/dagre'
+import { MarkerType } from '@xyflow/react'
 import type { Edge } from '@xyflow/react'
 import type { Pipeline } from '../types/pipeline'
 import { getNextNodeIds } from '../types/pipeline'
@@ -47,14 +48,37 @@ export function buildFlowGraph(pipeline: Pipeline): {
 
   const edges: Edge[] = edgeDefs.map(({ source, target, label }, i) => ({
     id: `e-${source}-${target}-${i}`,
+    type: 'floating',
     source,
     target,
     label,
     animated: false,
-    style: { stroke: '#94a3b8' },
+    style: { stroke: '#94a3b8', strokeWidth: 1.5 },
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' },
     labelStyle: { fontSize: 11, fill: '#64748b', fontWeight: 600 },
     labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.9 },
   }))
 
   return { nodes, edges }
+}
+
+export function reLayout(nodes: AnyFlowNode[], edges: Edge[]): AnyFlowNode[] {
+  const g = new dagre.graphlib.Graph()
+  g.setDefaultEdgeLabel(() => ({}))
+  g.setGraph({ rankdir: 'TB', ranksep: 80, nodesep: 60 })
+
+  for (const node of nodes) {
+    g.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT })
+  }
+  for (const edge of edges) {
+    g.setEdge(edge.source, edge.target)
+  }
+
+  dagre.layout(g)
+
+  return nodes.map(node => {
+    const pos = g.node(node.id)
+    if (!pos) return node
+    return { ...node, position: { x: pos.x - NODE_WIDTH / 2, y: pos.y - NODE_HEIGHT / 2 } }
+  })
 }
