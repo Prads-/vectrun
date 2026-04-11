@@ -34,7 +34,7 @@ export function toPipeline(
         const d = node.data as LogicNodeData
         return {
           id: node.id, type: 'logic',
-          data: { name: d.name || undefined, logicType: d.logicType, script: d.script, processPath: d.processPath, nextNodeIds: outEdges.map(e => e.target) }
+          data: { name: d.name || undefined, logicType: d.logicType, script: d.script, processPath: d.processPath, processPathType: d.processPathType, processInput: d.processInput, nextNodeIds: outEdges.map(e => e.target) }
         }
       }
       case 'wait': {
