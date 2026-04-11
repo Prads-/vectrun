@@ -148,6 +148,16 @@ try
 catch (Exception ex) { Console.Error.WriteLine($"Failed to save to '{outputPath}': {ex.Message}"); return 1; }
 
 Console.WriteLine($"OK: {outputPath} ({imageBytes.Length} bytes)");
+
+// ── Free VRAM ─────────────────────────────────────────────────────────────────
+
+try
+{
+    var freeBody = JsonSerializer.Serialize(new { unload_models = true, free_memory = true });
+    await http.PostAsync($"{endpoint}/free", new StringContent(freeBody, Encoding.UTF8, "application/json"));
+}
+catch { /* best-effort — image is already saved */ }
+
 return 0;
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
