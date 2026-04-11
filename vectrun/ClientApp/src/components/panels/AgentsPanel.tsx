@@ -25,15 +25,21 @@ export function AgentsPanel({ agents, models, tools, onChange, onSave, onAddToCa
   const [selected, setSelected] = useState<AgentConfig | null>(null)
   const [isNew, setIsNew] = useState(false)
   const [form, setForm] = useState<AgentConfig>(emptyAgent())
+  const [schemaText, setSchemaText] = useState('')
+  const [schemaError, setSchemaError] = useState<string | null>(null)
 
   function startNew() {
     setForm(emptyAgent())
+    setSchemaText('')
+    setSchemaError(null)
     setIsNew(true)
     setSelected(null)
   }
 
   function startEdit(agent: AgentConfig) {
     setForm({ ...agent, toolIds: [...(agent.toolIds ?? [])] })
+    setSchemaText(agent.outputSchema != null ? JSON.stringify(agent.outputSchema, null, 2) : '')
+    setSchemaError(null)
     setSelected(agent)
     setIsNew(false)
   }
@@ -41,14 +47,31 @@ export function AgentsPanel({ agents, models, tools, onChange, onSave, onAddToCa
   function cancelEdit() {
     setSelected(null)
     setIsNew(false)
+    setSchemaError(null)
+  }
+
+  function handleSchemaChange(text: string) {
+    setSchemaText(text)
+    if (!text.trim()) { setSchemaError(null); return }
+    try { JSON.parse(text); setSchemaError(null) }
+    catch { setSchemaError('Invalid JSON') }
   }
 
   function saveForm() {
+    if (schemaError) return
+
+    let parsedSchema: unknown = undefined
+    if (form.output === 'json' && schemaText.trim()) {
+      try { parsedSchema = JSON.parse(schemaText) }
+      catch { setSchemaError('Invalid JSON'); return }
+    }
+
     const cleaned: AgentConfig = {
       ...form,
       systemPrompt: form.systemPrompt || undefined,
       prompt: form.prompt || undefined,
       toolIds: form.toolIds && form.toolIds.length > 0 ? form.toolIds : undefined,
+      outputSchema: parsedSchema,
     }
     const updated = isNew
       ? [...agents, cleaned]
@@ -162,6 +185,21 @@ export function AgentsPanel({ agents, models, tools, onChange, onSave, onAddToCa
               <option value="json">json</option>
             </select>
           </Field>
+          {form.output === 'json' && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-slate-500">Output schema (optional JSON Schema)</span>
+              <textarea
+                value={schemaText}
+                onChange={e => handleSchemaChange(e.target.value)}
+                rows={6}
+                className={`${inputClass} resize-y font-mono text-xs ${schemaError ? 'border-red-400 focus:border-red-400 focus:ring-red-100' : ''}`}
+                placeholder={'{\n  "type": "object",\n  "properties": { ... }\n}'}
+              />
+              {schemaError && (
+                <span className="text-xs text-red-500">{schemaError}</span>
+              )}
+            </div>
+          )}
           <Field label="System prompt (optional)">
             <textarea
               value={form.systemPrompt ?? ''}
@@ -198,7 +236,8 @@ export function AgentsPanel({ agents, models, tools, onChange, onSave, onAddToCa
           <div className="flex gap-2 pt-1">
             <button
               onClick={saveForm}
-              className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-600"
+              disabled={!!schemaError}
+              className="rounded-lg bg-violet-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-600 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Save
             </button>
