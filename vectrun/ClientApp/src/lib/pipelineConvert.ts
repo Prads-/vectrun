@@ -27,14 +27,14 @@ export function toPipeline(
         const d = node.data as AgentNodeData
         return {
           id: node.id, type: 'agent',
-          data: { name: d.name || undefined, agentId: d.agentId, nextNodeIds: outEdges.map(e => e.target), toolIds: d.toolIds }
+          data: { name: d.name || undefined, agentId: d.agentId, nextNodeIds: outEdges.map(e => e.target), toolIds: d.toolIds, retry: d.retry }
         }
       }
       case 'logic': {
         const d = node.data as LogicNodeData
         return {
           id: node.id, type: 'logic',
-          data: { name: d.name || undefined, logicType: d.logicType, script: d.script, processPath: d.processPath, processPathType: d.processPathType, processInput: d.processInput, nextNodeIds: outEdges.map(e => e.target) }
+          data: { name: d.name || undefined, logicType: d.logicType, script: d.script, processPath: d.processPath, processPathType: d.processPathType, processInput: d.processInput, nextNodeIds: outEdges.map(e => e.target), retry: d.retry }
         }
       }
       case 'wait': {
