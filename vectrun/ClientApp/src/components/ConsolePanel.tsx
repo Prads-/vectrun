@@ -40,6 +40,67 @@ function formatTime(iso: string) {
   return `${hh}:${mm}:${ss}.${ms}`
 }
 
+// ── Markdown export ────────────────────────────────────────────────────────
+
+function saveAsMarkdown(visibleLogs: LogEntry[], filterLabel: string) {
+  const now = new Date()
+  const dateStr = now.toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+
+  const lines: string[] = [
+    '# Pipeline Output Log',
+    '',
+    `**Generated:** ${dateStr}`,
+    `**Filter:** ${filterLabel}`,
+    `**Entries:** ${visibleLogs.length}`,
+    '',
+    '---',
+    '',
+  ]
+
+  for (const entry of visibleLogs) {
+    const label = entry.nodeName ?? entry.nodeId
+    const time = formatTime(entry.timestamp)
+    const eventLabel = EVENT_STYLE[entry.event]?.label ?? entry.event
+
+    lines.push(`### ${time}  ·  ${label}  ·  ${entry.nodeType}`)
+    lines.push('')
+    lines.push(`**${eventLabel}**`)
+
+    if (entry.message) {
+      lines.push('')
+      // JSON-looking content or short single-liners → code block
+      // Prose (output / tool_result with plain text) → blockquote
+      const isJson = entry.message.trimStart().startsWith('{') || entry.message.trimStart().startsWith('[')
+      const isMultiline = entry.message.includes('\n')
+      if (isJson || (!isMultiline && entry.message.length <= 120)) {
+        lines.push('```')
+        lines.push(entry.message)
+        lines.push('```')
+      } else {
+        // Prose — use blockquote, one line at a time so markdown renders correctly
+        for (const l of entry.message.split('\n')) {
+          lines.push(`> ${l}`)
+        }
+      }
+    }
+
+    lines.push('')
+    lines.push('---')
+    lines.push('')
+  }
+
+  const content = lines.join('\n')
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `pipeline-log-${now.toISOString().slice(0, 19).replace(/:/g, '-')}.md`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function ConsolePanel({ logs, isRunning, open, onToggle, onClear }: Props) {
@@ -268,6 +329,17 @@ export function ConsolePanel({ logs, isRunning, open, onToggle, onClear }: Props
           </div>
         )}
 
+        {/* Save as markdown */}
+        {visibleLogs.length > 0 && open && (
+          <button
+            onClick={() => saveAsMarkdown(visibleLogs, filterLabel)}
+            className="rounded-md p-0.5 text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition"
+            title="Save log as Markdown"
+          >
+            <SaveLogIcon />
+          </button>
+        )}
+
         {/* Clear */}
         {logs.length > 0 && (
           <button
@@ -383,6 +455,16 @@ function ChevronDownIcon() {
   return (
     <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
       <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+    </svg>
+  )
+}
+
+function SaveLogIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 17V3" />
+      <path d="M7 12l5 5 5-5" />
+      <path d="M20 21H4" />
     </svg>
   )
 }
