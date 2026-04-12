@@ -69,11 +69,30 @@ await context.AddInitScriptAsync("Object.defineProperty(navigator, 'webdriver', 
 
 var page = await context.NewPageAsync();
 
-await page.GotoAsync(url, new PageGotoOptions
+// Reject non-HTML content types before navigating (PDFs, ZIPs, etc.)
+var lowerUrl = url.ToLowerInvariant().Split('?')[0];
+if (lowerUrl.EndsWith(".pdf") || lowerUrl.EndsWith(".zip") || lowerUrl.EndsWith(".exe") ||
+    lowerUrl.EndsWith(".docx") || lowerUrl.EndsWith(".xlsx") || lowerUrl.EndsWith(".pptx"))
 {
-    WaitUntil = WaitUntilState.Load,
-    Timeout = 60_000,
-});
+    Console.Error.WriteLine($"Skipped: URL points to a downloadable file, not a web page ({url})");
+    Console.WriteLine($"[Skipped: not a web page — {url}]");
+    return 1;
+}
+
+try
+{
+    await page.GotoAsync(url, new PageGotoOptions
+    {
+        WaitUntil = WaitUntilState.Load,
+        Timeout = 60_000,
+    });
+}
+catch (PlaywrightException ex) when (ex.Message.Contains("Download is starting"))
+{
+    Console.Error.WriteLine($"Skipped: URL triggered a file download, not a web page ({url})");
+    Console.WriteLine($"[Skipped: URL is a file download, not a web page — {url}]");
+    return 1;
+}
 
 // Give JS-rendered content a chance to settle, but don't hard-fail on
 // analytics-heavy sites that never reach full network idle.
