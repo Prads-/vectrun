@@ -50,6 +50,9 @@ internal class ToolDefinition : IToolDefinition
 
         await Task.WhenAll(stdoutTask, stderrTask, process.WaitForExitAsync(token));
 
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"Tool '{Name}' exited with code {process.ExitCode}");
+
         return await stdoutTask;
     }
 }

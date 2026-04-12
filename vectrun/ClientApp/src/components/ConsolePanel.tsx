@@ -25,7 +25,8 @@ const EVENT_STYLE: Record<LogEvent, { label: string; color: string }> = {
   tool_call:   { label: 'tool call',   color: 'text-amber-400' },
   tool_result: { label: 'tool result', color: 'text-emerald-400' },
   tool_log:    { label: 'tool log',    color: 'text-slate-400' },
-  error:       { label: 'error',       color: 'text-red-400' },
+  error:         { label: 'error',       color: 'text-red-400' },
+  branch_failed: { label: 'error',       color: 'text-red-400' },
 }
 
 function nodeStyle(type: string) {

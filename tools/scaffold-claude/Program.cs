@@ -56,15 +56,17 @@ Directory.CreateDirectory(projectDir);
 var claudeMd = BuildClaudeMd(projectName, requirements.Trim());
 await File.WriteAllTextAsync(Path.Combine(projectDir, "CLAUDE.md"), claudeMd);
 
-Console.Error.WriteLine($"Scaffolded project at: {projectDir}");
+await Console.Error.WriteLineAsync($"Scaffolded project at: {projectDir}");
 
 // ── Launch Claude Code ────────────────────────────────────────────────────────
 
 const string prompt =
     "Read CLAUDE.md for the complete project requirements. " +
-    "Implement the full project: create all necessary files, directories, and configuration. " +
-    "Choose appropriate technologies based on the requirements. " +
-    "When done, print a short summary of what was built and where the entry point is.";
+    "Then create a comprehensive TODO.md file in the project directory listing every task required to implement the project — " +
+    "cover project setup, all features, all files to create, configuration, and anything else needed for a complete, runnable result. " +
+    "Once the TODO.md is written, work through every item in it one by one, checking each off as you complete it. " +
+    "Do not stop until every item is checked off. " +
+    "When all items are done, print a short summary of what was built and where the entry point is.";
 
 var psi = new ProcessStartInfo
 {
@@ -72,11 +74,15 @@ var psi = new ProcessStartInfo
     WorkingDirectory       = projectDir,
     UseShellExecute        = false,
     RedirectStandardOutput = true,
-    RedirectStandardError  = false,
+    RedirectStandardError  = true,
 };
 psi.ArgumentList.Add("--dangerously-skip-permissions");
+psi.ArgumentList.Add("--output-format");
+psi.ArgumentList.Add("stream-json");
 psi.ArgumentList.Add("-p");
 psi.ArgumentList.Add(prompt);
+
+await Console.Error.WriteLineAsync("Launching Claude Code...");
 
 Process process;
 try
@@ -94,17 +100,93 @@ catch (Exception ex)
 
 using (process)
 {
-    // Stream claude's output to stderr so vectrun surfaces it as tool_log events in real-time.
+    // Drain stderr in background to prevent pipe deadlock
+    var stderrTask = Task.Run(async () =>
+    {
+        string? line;
+        while ((line = await process.StandardError.ReadLineAsync()) is not null)
+            await Console.Error.WriteLineAsync($"[stderr] {line}");
+    });
+
+    // Read stream-json events from stdout and forward as human-readable lines to stderr.
+    // Each line is a JSON object; we extract text content so the vectrun output panel
+    // shows what Claude is doing in real-time rather than waiting until the end.
     string? line;
     while ((line = await process.StandardOutput.ReadLineAsync()) is not null)
-        Console.Error.WriteLine(line);
+    {
+        var readable = ParseStreamJsonLine(line);
+        if (readable is not null)
+            await Console.Error.WriteLineAsync(readable);
+    }
 
+    await stderrTask;
     await process.WaitForExitAsync();
+
+    await Console.Error.WriteLineAsync($"Claude Code exited with code {process.ExitCode}.");
 
     // Only the final result goes to stdout — this becomes the tool result returned to the agent.
     Console.WriteLine($"Project directory: {projectDir}");
 
     return process.ExitCode;
+}
+
+// ── stream-json line parser ───────────────────────────────────────────────────
+
+static string? ParseStreamJsonLine(string line)
+{
+    if (string.IsNullOrWhiteSpace(line)) return null;
+
+    try
+    {
+        var doc = JsonSerializer.Deserialize<JsonElement>(line);
+
+        if (!doc.TryGetProperty("type", out var typeProp)) return line;
+        var type = typeProp.GetString();
+
+        switch (type)
+        {
+            case "assistant":
+            {
+                // Extract text content blocks from the assistant message
+                if (!doc.TryGetProperty("message", out var msg)) break;
+                if (!msg.TryGetProperty("content", out var content)) break;
+
+                var texts = new System.Text.StringBuilder();
+                foreach (var block in content.EnumerateArray())
+                {
+                    if (!block.TryGetProperty("type", out var bt)) continue;
+                    if (bt.GetString() == "text" && block.TryGetProperty("text", out var txt))
+                        texts.AppendLine(txt.GetString());
+                    else if (bt.GetString() == "tool_use" && block.TryGetProperty("name", out var toolName))
+                        texts.AppendLine($"[tool] {toolName.GetString()}");
+                }
+                var result = texts.ToString().Trim();
+                return result.Length > 0 ? result : null;
+            }
+
+            case "result":
+            {
+                if (doc.TryGetProperty("result", out var res))
+                    return $"[done] {res.GetString()}";
+                break;
+            }
+
+            case "system":
+                // Suppress system/init noise
+                return null;
+
+            default:
+                // Unknown event type — skip silently
+                return null;
+        }
+    }
+    catch
+    {
+        // Not valid JSON — write raw
+        return line;
+    }
+
+    return null;
 }
 
 // ── CLAUDE.md builder ─────────────────────────────────────────────────────────
