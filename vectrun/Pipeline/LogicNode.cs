@@ -83,7 +83,7 @@ internal class LogicNode : BaseNode<LogicNodeData>
         var output = await stdoutTask;
         var stderr = await stderrTask;
 
-        if (process.ExitCode != 0 || !string.IsNullOrWhiteSpace(stderr))
+        if (process.ExitCode != 0)
         {
             throw new InvalidOperationException(
                 $"Process exited with code {process.ExitCode}. Stderr: {stderr}");
