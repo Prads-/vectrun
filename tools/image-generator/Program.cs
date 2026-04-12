@@ -29,7 +29,7 @@ using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
 if (json.TryGetProperty("images", out var imageArray) && imageArray.ValueKind == JsonValueKind.Array)
 {
     // Bulk mode
-    var defaults = json.TryGetProperty("defaults", out var def) ? def : default;
+    var defaults = json.TryGetProperty("defaults", out var def) ? def : json;
     var items = imageArray.EnumerateArray().ToList();
 
     if (items.Count == 0)
