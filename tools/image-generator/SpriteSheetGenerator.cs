@@ -2,6 +2,36 @@ using SkiaSharp;
 
 internal static class SpriteSheetGenerator
 {
+    internal static async Task<bool> ComposeFromFiles(
+        IReadOnlyList<string> inputPaths, string outputPath, int columns, int rows, int frameWidth, int frameHeight)
+    {
+        using var bitmap = new SKBitmap(columns * frameWidth, rows * frameHeight);
+        using var canvas  = new SKCanvas(bitmap);
+        canvas.Clear(SKColors.Transparent);
+
+        for (var i = 0; i < inputPaths.Count; i++)
+        {
+            var row = i / columns;
+            var col = i % columns;
+            if (row >= rows) break;
+
+            using var src = SKBitmap.Decode(inputPaths[i]);
+            if (src is null) { Console.Error.WriteLine($"  Warning: could not decode {inputPaths[i]}, skipping."); continue; }
+            using var resized = src.Resize(new SKImageInfo(frameWidth, frameHeight), SKSamplingOptions.Default);
+            canvas.DrawBitmap(resized, col * frameWidth, row * frameHeight);
+        }
+
+        using var skImage = SKImage.FromBitmap(bitmap);
+        using var data    = skImage.Encode(SKEncodedImageFormat.Png, 100);
+
+        var absPath = Path.GetFullPath(outputPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(absPath)!);
+        await File.WriteAllBytesAsync(absPath, data.ToArray());
+
+        Console.WriteLine($"OK: {absPath} ({data.Size} bytes, {inputPaths.Count} frames)");
+        return true;
+    }
+
     internal static async Task<bool> Generate(ImageParams p, HttpClient http, string endpoint)
     {
         var tempFiles = new List<string>();

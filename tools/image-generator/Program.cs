@@ -46,6 +46,29 @@ try
         for (var i = 0; i < items.Count; i++)
         {
             var item = items[i];
+
+            // Composite type — stitches existing images into a grid, no generation needed
+            if (item.TryGetProperty("type", out var typeCheck) && typeCheck.GetString() == "composite")
+            {
+                if (!item.TryGetProperty("outputPath", out var opEl) || string.IsNullOrWhiteSpace(opEl.GetString()))
+                { Console.Error.WriteLine($"[{i + 1}/{items.Count}] Missing 'outputPath' — skipping."); failed++; continue; }
+
+                var inputPaths = item.TryGetProperty("inputPaths", out var ipEl)
+                    ? ipEl.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList()
+                    : new List<string>();
+                int GetInt(string key, int fallback) =>
+                    item.TryGetProperty(key, out var v) ? v.GetInt32() :
+                    defaults.ValueKind != JsonValueKind.Undefined && defaults.TryGetProperty(key, out var dv) ? dv.GetInt32() : fallback;
+
+                Console.Error.WriteLine($"[{i + 1}/{items.Count}] Compositing: {opEl.GetString()}");
+                var ok = await SpriteSheetGenerator.ComposeFromFiles(
+                    inputPaths, opEl.GetString()!,
+                    GetInt("columns", 4), GetInt("rows", 2),
+                    GetInt("frameWidth", 128), GetInt("frameHeight", 128));
+                if (!ok) failed++;
+                continue;
+            }
+
             var p = MergeParams(defaults, item);
 
             if (p.Type == "sprite_sheet" ? string.IsNullOrWhiteSpace(p.CharacterPrompt) : string.IsNullOrWhiteSpace(p.Prompt))
@@ -63,10 +86,10 @@ try
             }
 
             Console.Error.WriteLine($"[{i + 1}/{items.Count}] Generating: {p.OutputPath}");
-            var ok = p.Type == "sprite_sheet"
+            var ok2 = p.Type == "sprite_sheet"
                 ? await SpriteSheetGenerator.Generate(p, http, endpoint)
                 : await ComfyUiClient.GenerateTextToImg(p, http, endpoint);
-            if (!ok) failed++;
+            if (!ok2) failed++;
         }
 
         if (failed > 0)
