@@ -45,7 +45,7 @@ return operation switch
 {
     "read"   => Read(keyFile),
     "write"  => Write(nsDir, keyFile, cliValue),
-    "update" => Update(keyFile, cliValue),
+    "update" => Update(nsDir, keyFile, cliValue),
     "delete" => Delete(keyFile),
     "append" => Append(nsDir, keyFile, cliValue, separator),
     _        => UnknownOperation(operation)
@@ -86,7 +86,7 @@ static int Write(string nsDir, string keyFile, string? value)
     return PersistValue(nsDir, keyFile, value);
 }
 
-static int Update(string keyFile, string? value)
+static int Update(string nsDir, string keyFile, string? value)
 {
     if (value is null)
     {
@@ -94,13 +94,7 @@ static int Update(string keyFile, string? value)
         return 1;
     }
 
-    if (!File.Exists(keyFile))
-    {
-        Console.Error.WriteLine("Key not found. Use 'write' to create it.");
-        return 1;
-    }
-
-    return PersistValue(Path.GetDirectoryName(keyFile)!, keyFile, value);
+    return PersistValue(nsDir, keyFile, value);
 }
 
 static int Delete(string keyFile)
