@@ -25,69 +25,72 @@ var endpoint = Environment.GetEnvironmentVariable("COMFYUI_ENDPOINT") ?? "http:/
 using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
 
 // ── Detect mode: bulk vs single ───────────────────────────────────────────────
-
-if (json.TryGetProperty("images", out var imageArray) && imageArray.ValueKind == JsonValueKind.Array)
+try
 {
-    // Bulk mode
-    var defaults = json.TryGetProperty("defaults", out var def) ? def : json;
-    var items = imageArray.EnumerateArray().ToList();
-
-    if (items.Count == 0)
+    if (json.TryGetProperty("images", out var imageArray) && imageArray.ValueKind == JsonValueKind.Array)
     {
-        Console.Error.WriteLine("'images' array is empty.");
-        return 1;
+        // Bulk mode
+        var defaults = json.TryGetProperty("defaults", out var def) ? def : json;
+        var items = imageArray.EnumerateArray().ToList();
+
+        if (items.Count == 0)
+        {
+            Console.Error.WriteLine("'images' array is empty.");
+            return 1;
+        }
+
+        var failed = 0;
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+            var p = MergeParams(defaults, item);
+
+            if (string.IsNullOrWhiteSpace(p.Prompt))
+            {
+                Console.Error.WriteLine($"[{i + 1}/{items.Count}] Missing 'prompt' — skipping.");
+                failed++;
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(p.OutputPath))
+            {
+                Console.Error.WriteLine($"[{i + 1}/{items.Count}] Missing 'outputPath' — skipping.");
+                failed++;
+                continue;
+            }
+
+            Console.Error.WriteLine($"[{i + 1}/{items.Count}] Generating: {p.OutputPath}");
+            var ok = await GenerateImage(p, http, endpoint);
+            if (!ok) failed++;
+        }
+
+        if (failed > 0)
+        {
+            Console.Error.WriteLine($"{failed}/{items.Count} image(s) failed.");
+            return 1;
+        }
+
+        Console.WriteLine($"OK: {items.Count} image(s) generated.");
+        return 0;
     }
-
-    var failed = 0;
-    for (var i = 0; i < items.Count; i++)
+    else
     {
-        var item = items[i];
-        var p = MergeParams(defaults, item);
+        // Single image mode (backward-compatible)
+        var p = MergeParams(default, json);
 
         if (string.IsNullOrWhiteSpace(p.Prompt))
-        {
-            Console.Error.WriteLine($"[{i + 1}/{items.Count}] Missing 'prompt' — skipping.");
-            failed++;
-            continue;
-        }
+        { Console.Error.WriteLine("Missing required field: 'prompt'"); return 1; }
+
         if (string.IsNullOrWhiteSpace(p.OutputPath))
-        {
-            Console.Error.WriteLine($"[{i + 1}/{items.Count}] Missing 'outputPath' — skipping.");
-            failed++;
-            continue;
-        }
+        { Console.Error.WriteLine("Missing required field: 'outputPath'"); return 1; }
 
-        Console.Error.WriteLine($"[{i + 1}/{items.Count}] Generating: {p.OutputPath}");
         var ok = await GenerateImage(p, http, endpoint);
-        if (!ok) failed++;
+        return ok ? 0 : 1;
     }
-
+}
+finally
+{
     // Free VRAM once at the end
     await FreeVram(http, endpoint);
-
-    if (failed > 0)
-    {
-        Console.Error.WriteLine($"{failed}/{items.Count} image(s) failed.");
-        return 1;
-    }
-
-    Console.WriteLine($"OK: {items.Count} image(s) generated.");
-    return 0;
-}
-else
-{
-    // Single image mode (backward-compatible)
-    var p = MergeParams(default, json);
-
-    if (string.IsNullOrWhiteSpace(p.Prompt))
-    { Console.Error.WriteLine("Missing required field: 'prompt'"); return 1; }
-
-    if (string.IsNullOrWhiteSpace(p.OutputPath))
-    { Console.Error.WriteLine("Missing required field: 'outputPath'"); return 1; }
-
-    var ok = await GenerateImage(p, http, endpoint);
-    await FreeVram(http, endpoint);
-    return ok ? 0 : 1;
 }
 
 // ── Generation ────────────────────────────────────────────────────────────────
