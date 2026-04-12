@@ -23,7 +23,7 @@ internal class BranchNode : INode
         CancellationToken token)
     {
         var isMatch = string.IsNullOrEmpty(_data.ExpectedOutput)
-            || string.Equals(context.Input, _data.ExpectedOutput, StringComparison.Ordinal);
+            || string.Equals(context.Input?.Trim(), _data.ExpectedOutput, StringComparison.Ordinal);
 
         return Task.FromResult(new NodeExecutionResult
         {

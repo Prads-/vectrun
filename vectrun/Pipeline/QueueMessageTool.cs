@@ -28,7 +28,7 @@ internal class QueueMessageTool : IToolDefinition
         }
     };
 
-    public Task<string> ExecuteAsync(string arguments, CancellationToken token)
+    public Task<string> ExecuteAsync(string arguments, Action<string>? onLog, CancellationToken token)
     {
         var args = JsonSerializer.Deserialize<JsonElement>(arguments);
 

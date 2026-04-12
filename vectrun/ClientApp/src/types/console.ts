@@ -1,4 +1,4 @@
-export type LogEvent = 'started' | 'output' | 'tool_call' | 'tool_result' | 'error'
+export type LogEvent = 'started' | 'output' | 'tool_call' | 'tool_result' | 'tool_log' | 'error'
 
 export interface LogEntry {
   timestamp: string   // ISO 8601
