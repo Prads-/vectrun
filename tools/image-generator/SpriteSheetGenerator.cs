@@ -24,43 +24,33 @@ internal static class SpriteSheetGenerator
             if (!await ComfyUiClient.GenerateTextToImg(canonicalParams, http, endpoint))
                 return false;
 
-            // Phase 2 — animation frames (img2img, same seed as canonical)
+            // Phase 2 — one generation per cell, each with its own pose prompt
             var frames = new List<(int Row, int Col, string TempPath)>();
 
-            foreach (var anim in p.Animations)
+            foreach (var cell in p.Animations)
             {
-                if (anim.Row >= p.Rows)
+                if (cell.Row >= p.Rows || cell.Col >= p.Columns)
                 {
-                    Console.Error.WriteLine($"  [sprite_sheet] Warning: row {anim.Row} >= rows {p.Rows}, skipping '{anim.Prompt}'.");
+                    Console.Error.WriteLine($"  [sprite_sheet] Warning: cell ({cell.Row},{cell.Col}) out of bounds ({p.Rows}x{p.Columns}), skipping.");
                     continue;
                 }
 
-                for (var col = 0; col < anim.FrameCount; col++)
+                var framePath = Path.ChangeExtension(Path.GetTempFileName(), ".png");
+                tempFiles.Add(framePath);
+
+                Console.Error.WriteLine($"  [sprite_sheet] Cell ({cell.Row},{cell.Col}): {cell.Prompt}");
+
+                var frameParams = p with
                 {
-                    if (col >= p.Columns)
-                    {
-                        Console.Error.WriteLine($"  [sprite_sheet] Warning: col {col} >= columns {p.Columns}, truncating '{anim.Prompt}'.");
-                        break;
-                    }
+                    Prompt     = $"{p.CharacterPrompt}, {cell.Prompt}",
+                    OutputPath = framePath,
+                    Seed       = p.Seed + frames.Count  // vary seed per cell for pose diversity
+                };
 
-                    var framePath = Path.ChangeExtension(Path.GetTempFileName(), ".png");
-                    tempFiles.Add(framePath);
+                if (!await ComfyUiClient.GenerateWithIPAdapter(frameParams, canonicalPath, http, endpoint))
+                    return false;
 
-                    Console.Error.WriteLine($"  [sprite_sheet] Frame row={anim.Row} col={col}: {anim.Prompt}");
-
-                    var frameParams = p with
-                    {
-                        Prompt     = $"{p.CharacterPrompt}, {anim.Prompt}",
-                        OutputPath = framePath
-                        // Width/Height intentionally not overridden — generate at full model resolution
-                        // Seed intentionally not overridden — same seed as canonical for consistency
-                    };
-
-                    if (!await ComfyUiClient.GenerateImgToImg(frameParams, canonicalPath, http, endpoint))
-                        return false;
-
-                    frames.Add((anim.Row, col, framePath));
-                }
+                frames.Add((cell.Row, cell.Col, framePath));
             }
 
             // Phase 3 — composite with SkiaSharp

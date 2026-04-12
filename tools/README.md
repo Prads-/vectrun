@@ -163,16 +163,26 @@ Performs file system operations: create directories, write text or binary files,
 
 ## image-generator
 
-Generates an image via a locally running **ComfyUI** instance and saves it to disk. Builds a standard txt2img workflow (KSampler → VAEDecode → SaveImage), queues it via the ComfyUI REST API, polls until complete, then downloads and saves the output PNG.
+Generates images via a locally running **ComfyUI** instance. Supports single images, bulk generation, and sprite sheets with IPAdapter-based character consistency.
 
 **Requires:** ComfyUI running locally (default `http://localhost:8188`).
 
+### CLI
+
+```bash
+image-generator <file.json>
+```
+
+Or via stdin (pipe a JSON file in).
+
 ### Environment variables
 
-| Variable             | Default                              | Description                                           |
-|----------------------|--------------------------------------|-------------------------------------------------------|
-| `COMFYUI_ENDPOINT`   | `http://localhost:8188`              | Base URL of the ComfyUI instance                      |
-| `COMFYUI_CHECKPOINT` | `v1-5-pruned-emaonly.safetensors`    | Default checkpoint filename. Must exist in ComfyUI's `models/checkpoints/` directory. |
+| Variable             | Default                                        | Description                                           |
+|----------------------|------------------------------------------------|-------------------------------------------------------|
+| `COMFYUI_ENDPOINT`   | `http://localhost:8188`                        | Base URL of the ComfyUI instance                      |
+| `COMFYUI_CHECKPOINT` | `v1-5-pruned-emaonly.safetensors`              | Default checkpoint filename                           |
+| `IPADAPTER_MODEL`    | `ip-adapter_sdxl.bin`                         | IPAdapter model filename (sprite sheets only)         |
+| `CLIP_VISION_MODEL`  | `CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors` | CLIP Vision model filename (sprite sheets only)       |
 
 ### Single image (stdin JSON)
 
@@ -233,9 +243,63 @@ Images are generated one at a time. Each completed image prints `OK: <path> (<by
 |--------------|----------|---------|--------------------------------------------------------------------------|
 | `prompt`     | Yes      | —       | Positive prompt for this image.                                          |
 | `outputPath` | Yes      | —       | Absolute path where the PNG will be saved.                               |
-| `width`      | No       | `1024`  | Width in pixels. Must be a multiple of 8. Varies per asset type.        |
-| `height`     | No       | `1024`  | Height in pixels. Must be a multiple of 8. Varies per asset type.       |
+| `width`      | No       | `1024`  | Width in pixels. Must be a multiple of 8.                                |
+| `height`     | No       | `1024`  | Height in pixels. Must be a multiple of 8.                               |
 | `seed`       | No       | Random  | Fixed seed. If omitted, each image gets a fresh random seed.             |
+
+### Sprite sheet generation
+
+Generates a canonical character reference via text2img, then generates each cell independently via IPAdapter (character consistency) with a unique pose prompt per cell. All frames are resized and composited into a grid PNG using SkiaSharp.
+
+**Requires:** `ComfyUI_IPAdapter_plus` custom node installed via ComfyUI Manager, plus:
+- `models/ipadapter/ip-adapter_sdxl.bin`
+- `models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors`
+
+```json
+{
+  "defaults": {
+    "checkpoint": "dreamshaperXL_lightningDPMSDE.safetensors",
+    "sampler": "dpmpp_sde",
+    "scheduler": "karras",
+    "steps": 6,
+    "cfg": 2.0,
+    "negativePrompt": "multiple characters, character sheet, background scenery, ugly, deformed, blurry"
+  },
+  "images": [{
+    "type": "sprite_sheet",
+    "outputPath": "assets/characters/hero_sheet.png",
+    "width": 1024,
+    "height": 1024,
+    "characterPrompt": "solo character, young female adventurer, short red hair, green tunic, clean bold black outlines, flat colors, simple white background, full body, front view, centered",
+    "frameWidth": 128,
+    "frameHeight": 128,
+    "columns": 4,
+    "rows": 2,
+    "ipAdapterWeight": 0.7,
+    "animations": [
+      { "row": 0, "col": 0, "prompt": "standing idle, arms relaxed at sides" },
+      { "row": 0, "col": 1, "prompt": "breathing in, chest slightly raised" },
+      { "row": 1, "col": 0, "prompt": "walking, left foot forward, right arm forward" },
+      { "row": 1, "col": 1, "prompt": "walking, right foot forward, left arm forward" }
+    ]
+  }]
+}
+```
+
+Each `animations` entry is exactly one cell at `(row, col)` with a specific pose prompt. Cells not listed remain transparent. Frames are generated at `width × height` and resized to `frameWidth × frameHeight` when compositing. The output PNG is `columns × frameWidth` wide and `rows × frameHeight` tall.
+
+**Sprite sheet fields:**
+
+| Field             | Default | Description                                                              |
+|-------------------|---------|--------------------------------------------------------------------------|
+| `type`            | —       | Must be `"sprite_sheet"`                                                 |
+| `characterPrompt` | —       | Appearance-only description used for the canonical reference sprite      |
+| `animations`      | —       | Array of `{ row, col, prompt }` — one entry per cell                    |
+| `frameWidth`      | `128`   | Width of each cell in the output grid (px)                               |
+| `frameHeight`     | `128`   | Height of each cell in the output grid (px)                              |
+| `columns`         | `6`     | Number of columns in the grid                                            |
+| `rows`            | `5`     | Number of rows in the grid                                               |
+| `ipAdapterWeight` | `0.7`   | IPAdapter influence strength (0.0–1.0)                                   |
 
 ### Recommended dimensions by asset type
 
@@ -256,7 +320,7 @@ Images are generated one at a time. Each completed image prints `OK: <path> (<by
 
 - The tool polls ComfyUI every 2 seconds until the job completes.
 - HTTP client timeout is 10 minutes to accommodate slow generations.
-- After saving the image, `POST /free` (`unload_models: true, free_memory: true`) is called automatically to release VRAM. This is best-effort and does not affect the tool's exit code.
+- After all images are done, `POST /free` (`unload_models: true, free_memory: true`) is called automatically to release VRAM.
 - The `checkpoint` field is useful when you want different models for different asset categories (e.g. a pixel art LoRA for sprites, a different model for cinematic backgrounds).
 
 ---

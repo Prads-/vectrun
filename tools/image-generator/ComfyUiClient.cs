@@ -79,6 +79,70 @@ internal static class ComfyUiClient
         return await QueueAndSave(workflow, p, http, endpoint);
     }
 
+    // ── IPAdapter ─────────────────────────────────────────────────────────────
+
+    internal static async Task<bool> GenerateWithIPAdapter(ImageParams p, string referenceImagePath, HttpClient http, string endpoint)
+    {
+        var uploadedName = await UploadImage(referenceImagePath, http, endpoint);
+        if (uploadedName is null)
+        {
+            Console.Error.WriteLine("  Failed to upload reference image to ComfyUI.");
+            return false;
+        }
+
+        var ipAdapterModel  = Environment.GetEnvironmentVariable("IPADAPTER_MODEL")    ?? "ip-adapter_sdxl.bin";
+        var clipVisionModel = Environment.GetEnvironmentVariable("CLIP_VISION_MODEL") ?? "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors";
+
+        var workflow = new Dictionary<string, object>
+        {
+            ["1"]  = new { class_type = "CheckpointLoaderSimple", inputs = new { ckpt_name = p.Checkpoint } },
+            ["2"]  = new { class_type = "CLIPTextEncode",         inputs = new { text = p.Prompt,         clip = new object[] { "1", 1 } } },
+            ["3"]  = new { class_type = "CLIPTextEncode",         inputs = new { text = p.NegativePrompt, clip = new object[] { "1", 1 } } },
+            ["4"]  = new { class_type = "EmptyLatentImage",       inputs = new { width = p.Width, height = p.Height, batch_size = 1 } },
+            ["5"]  = new
+            {
+                class_type = "KSampler",
+                inputs     = new
+                {
+                    seed         = p.Seed,
+                    steps        = p.Steps,
+                    cfg          = p.Cfg,
+                    sampler_name = p.Sampler,
+                    scheduler    = p.Scheduler,
+                    denoise      = 1.0,
+                    model        = new object[] { "11", 0 },  // IPAdapter-modified model
+                    positive     = new object[] { "2",  0 },
+                    negative     = new object[] { "3",  0 },
+                    latent_image = new object[] { "4",  0 }
+                }
+            },
+            ["6"]  = new { class_type = "VAEDecode",             inputs = new { samples = new object[] { "5", 0 }, vae = new object[] { "1", 2 } } },
+            ["7"]  = new { class_type = "SaveImage",             inputs = new { filename_prefix = "vectrun", images = new object[] { "6", 0 } } },
+            ["8"]  = new { class_type = "IPAdapterModelLoader",  inputs = new { ipadapter_file = ipAdapterModel } },
+            ["9"]  = new { class_type = "CLIPVisionLoader",      inputs = new { clip_name = clipVisionModel } },
+            ["10"] = new { class_type = "LoadImage",             inputs = new { image = uploadedName } },
+            ["11"] = new
+            {
+                class_type = "IPAdapterAdvanced",
+                inputs     = new
+                {
+                    model          = new object[] { "1",  0 },
+                    ipadapter      = new object[] { "8",  0 },
+                    image          = new object[] { "10", 0 },
+                    clip_vision    = new object[] { "9",  0 },
+                    weight         = p.IpAdapterWeight,
+                    weight_type    = "linear",
+                    combine_embeds = "concat",
+                    start_at       = 0.0,
+                    end_at         = 1.0,
+                    embeds_scaling = "V only"
+                }
+            }
+        };
+
+        return await QueueAndSave(workflow, p, http, endpoint);
+    }
+
     // ── Upload reference image ────────────────────────────────────────────────
 
     internal static async Task<string?> UploadImage(string imagePath, HttpClient http, string endpoint)
@@ -151,7 +215,8 @@ internal static class ComfyUiClient
                 status.TryGetProperty("status_str", out var statusStr) &&
                 statusStr.GetString() == "error")
             {
-                Console.Error.WriteLine("  ComfyUI reported an error.");
+                var messages = status.TryGetProperty("messages", out var msgs) ? msgs.ToString() : "(no details)";
+                Console.Error.WriteLine($"  ComfyUI reported an error: {messages}");
                 return false;
             }
 

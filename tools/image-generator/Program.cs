@@ -115,11 +115,11 @@ static ImageParams MergeParams(JsonElement defaults, JsonElement item)
         return fallback;
     }
 
-    var animations = Get<IReadOnlyList<AnimationRow>>("animations", [],
-        e => e.EnumerateArray().Select(a => new AnimationRow(
-            Row:        a.TryGetProperty("row",        out var r)  ? r.GetInt32()         : 0,
-            FrameCount: a.TryGetProperty("frameCount", out var fc) ? fc.GetInt32()        : 1,
-            Prompt:     a.TryGetProperty("prompt",     out var ap) ? ap.GetString() ?? "" : ""
+    var animations = Get<IReadOnlyList<AnimationCell>>("animations", [],
+        e => e.EnumerateArray().Select(a => new AnimationCell(
+            Row:    a.TryGetProperty("row",    out var r)  ? r.GetInt32()         : 0,
+            Col:    a.TryGetProperty("col",    out var c)  ? c.GetInt32()         : 0,
+            Prompt: a.TryGetProperty("prompt", out var ap) ? ap.GetString() ?? "" : ""
         )).ToList());
 
     return new ImageParams(
@@ -141,7 +141,8 @@ static ImageParams MergeParams(JsonElement defaults, JsonElement item)
         FrameHeight:     Get("frameHeight",      128,                                       e => e.GetInt32()),
         Columns:         Get("columns",          6,                                         e => e.GetInt32()),
         Rows:            Get("rows",             5,                                         e => e.GetInt32()),
-        ImgToImgDenoise: Get("imgToImgDenoise",  0.70,                                      e => e.GetDouble())
+        ImgToImgDenoise:  Get("imgToImgDenoise",  0.70,                                      e => e.GetDouble()),
+        IpAdapterWeight:  Get("ipAdapterWeight",  0.7,                                       e => e.GetDouble())
     );
 }
 
@@ -150,7 +151,7 @@ static string DefaultCheckpoint() => Environment.GetEnvironmentVariable("COMFYUI
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-record AnimationRow(int Row, int FrameCount, string Prompt);
+record AnimationCell(int Row, int Col, string Prompt);
 
 record ImageParams(
     string                      Prompt,
@@ -166,10 +167,11 @@ record ImageParams(
     string                      Scheduler,
     string                      Type,
     string                      CharacterPrompt,
-    IReadOnlyList<AnimationRow> Animations,
+    IReadOnlyList<AnimationCell> Animations,
     int                         FrameWidth,
     int                         FrameHeight,
     int                         Columns,
     int                         Rows,
-    double                      ImgToImgDenoise
+    double                      ImgToImgDenoise,
+    double                      IpAdapterWeight
 );
