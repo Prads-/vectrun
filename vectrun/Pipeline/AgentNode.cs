@@ -63,9 +63,13 @@ internal class AgentNode : BaseNode<AgentNodeData>
 
             if (response.ToolCalls == null || response.ToolCalls.Count == 0)
             {
+                var output = response.Message.Content;
+                if (_agentConfig?.Output == "json")
+                    output = StripMarkdownCodeFence(output);
+
                 return new NodeExecutionResult
                 {
-                    Output = response.Message.Content,
+                    Output = output,
                     NextNodeIds = Data.NextNodeIds
                 };
             }
@@ -104,6 +108,20 @@ internal class AgentNode : BaseNode<AgentNodeData>
             .ToList();
 
         return all.Count > 0 ? all : null;
+    }
+
+    // Models sometimes wrap JSON output in markdown code fences (```json ... ```)
+    // even when a structured format is requested. Strip them so downstream nodes
+    // always receive raw JSON.
+    private static string StripMarkdownCodeFence(string content)
+    {
+        var trimmed = content.Trim();
+        if (!trimmed.StartsWith('`')) return trimmed;
+
+        var start = trimmed.IndexOfAny(['{', '[']);
+        if (start < 0) return trimmed;
+
+        return trimmed[start..].TrimEnd('`');
     }
 
     private Task<string> ExecuteTool(AIToolCall call, CancellationToken token)
