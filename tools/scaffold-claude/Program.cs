@@ -94,14 +94,14 @@ catch (Exception ex)
 
 using (process)
 {
-    // Stream claude's output to our stdout so it flows through the vectrun pipeline.
+    // Stream claude's output to stderr so vectrun surfaces it as tool_log events in real-time.
     string? line;
     while ((line = await process.StandardOutput.ReadLineAsync()) is not null)
-        Console.WriteLine(line);
+        Console.Error.WriteLine(line);
 
     await process.WaitForExitAsync();
 
-    Console.WriteLine();
+    // Only the final result goes to stdout — this becomes the tool result returned to the agent.
     Console.WriteLine($"Project directory: {projectDir}");
 
     return process.ExitCode;
