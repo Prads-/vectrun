@@ -155,7 +155,7 @@ Both `pathType` options are configurable in the web editor's **Tools** panel, wh
 | **logic** | Runs an external process (`logicType: "process"`) or an embedded Lua script (`logicType: "script"`). Input via stdin, output from stdout or return value. A process fails if it exits with a non-zero code or writes anything to stderr. Set `processPathType` to `"relative"` (default, resolved relative to the pipeline folder) or `"absolute"`. |
 | **wait** | Sleeps for `durationMs` milliseconds, then passes input through unchanged. |
 
-### Logic node — `processInput` and `{INPUT}`
+### Logic node — `processInput` and `{PREVIOUS_AGENT_OUTPUT}`
 
 By default a logic node pipes the previous node's output directly to the process stdin. Use `processInput` to override this with a hardcoded payload:
 
@@ -215,17 +215,19 @@ When a node exhausts all retries the branch it belongs to stops. Other parallel 
 
 ## Web UI
 
-The editor is a drag-and-drop graph canvas backed by a left sidebar with five sections:
+The editor is a drag-and-drop graph canvas backed by a collapsible left sidebar. The sidebar icon bar has four section tabs — **Nodes**, **Models**, **Agents**, **Tools** — plus **Run** and **Save** buttons at the bottom. The content panel is resizable (drag the right edge) and its width persists across sessions.
 
 - **Nodes** — view and edit all pipeline nodes; set the pipeline name and start node
 - **Models** — configure AI backends
-- **Agents** — define agents and assign models, tools, and prompts
-- **Tools** — view registered external tools
-- **Run** — provide optional input and execute the pipeline
+- **Agents** — define agents, assign models/tools/prompts, set output type and optional JSON schema; drag agents directly onto the canvas or use the **Add to Canvas** button
+- **Tools** — view and edit registered external tools
+- **Run** — provide optional input and execute the pipeline; includes a **Stop** button to cancel a running pipeline
+
+The canvas toolbar includes a **Layout** button that auto-positions nodes using a dagre-based directed layout. Edges use a floating style that routes around nodes, and node connection handles are hidden until the node is hovered or selected.
 
 ### Live output console
 
-Clicking **Run** streams log entries in real time to a collapsible output panel at the bottom of the canvas. Each entry shows a timestamp, the node that produced it, and the event type:
+Clicking **Run** streams log entries in real time to a collapsible output panel at the bottom of the canvas. The panel height is resizable and persists across sessions. Each entry shows a timestamp, the node that produced it, and the event type:
 
 | Event | When it fires |
 |---|---|
@@ -237,7 +239,7 @@ Clicking **Run** streams log entries in real time to a collapsible output panel 
 | `failed` | A node has exhausted all retries |
 | `branch_failed` | A branch stopped due to an unrecoverable node failure |
 
-Entries can be filtered by node using the dropdown in the panel header.
+Entries can be filtered by one or more nodes using the multi-select dropdown in the panel header.
 
 ## Inter-agent messaging
 
@@ -254,13 +256,23 @@ The `tools/` directory contains ready-made executables you can reference in `too
 
 ### web-scraper
 
-Fetches the fully-rendered HTML of a URL (JavaScript executed) and writes it to stdout.
+Fetches the fully-rendered HTML (or visible text) of a URL using a headless Chromium browser (Playwright). JavaScript executes before content is captured.
 
-```
-web-scraper <url>
+```bash
+web-scraper <url> [--extract-text]
 ```
 
-Uses a headless Chromium browser (Playwright / Chromium) with bot-detection mitigations applied: a realistic Chrome user-agent, `AutomationControlled` disabled, and `navigator.webdriver` hidden from JavaScript. Navigation waits for the page `load` event (60 s timeout), then attempts an additional 25 s network-idle wait (best-effort — sites with persistent analytics beacons won't block on this).
+Pipeline stdin JSON:
+
+```json
+{ "url": "https://example.com", "extractText": true }
+```
+
+| Field | Default | Description |
+|---|---|---|
+| `extractText` | `false` | When `true`, returns visible page text with all HTML/CSS/JS stripped. When `false` (default), returns raw HTML. |
+
+Uses bot-detection mitigations: realistic Chrome user-agent, `AutomationControlled` disabled, `navigator.webdriver` hidden. Navigation waits for the `load` event (30 s timeout), then attempts an additional 25 s network-idle wait (best-effort). For Google Search pages, structured title/URL/snippet tuples are extracted from the DOM instead of raw HTML to avoid obfuscated results.
 
 ### kv-store
 
@@ -298,25 +310,11 @@ The requirements text is read from stdin (piped from a previous node). Claude Co
 
 ### image-generator
 
-Generates an image via a local [ComfyUI](https://github.com/comfyanonymous/ComfyUI) instance and saves it to disk. Input is a JSON object read from stdin.
+Generates an image (or a batch of images) via a local [ComfyUI](https://github.com/comfyanonymous/ComfyUI) instance and saves each to disk. Input is a JSON object read from stdin.
 
-| Field | Required | Default | Description |
-|---|---|---|---|
-| `prompt` | yes | — | Positive prompt describing the image. |
-| `outputPath` | yes | — | Absolute path where the PNG will be saved. |
-| `negativePrompt` | no | built-in quality defaults | Things to avoid in the image. |
-| `width` | no | `1024` | Image width in pixels (must be a multiple of 8). |
-| `height` | no | `1024` | Image height in pixels (must be a multiple of 8). |
-| `steps` | no | `25` | Sampling steps. Use `6`–`8` for Lightning/Turbo models. |
-| `cfg` | no | `7.0` | Classifier-free guidance scale. Use `1.5`–`2.0` for Lightning/Turbo models. |
-| `seed` | no | random | Fixed seed for reproducibility. |
-| `checkpoint` | no | `COMFYUI_CHECKPOINT` env var | Checkpoint filename as it appears in ComfyUI's `models/checkpoints/` folder. |
-| `sampler` | no | `"euler"` | ComfyUI sampler name (e.g. `"dpmpp_sde"` for DPM++ SDE models). |
-| `scheduler` | no | `"normal"` | ComfyUI scheduler name (e.g. `"karras"`). |
+ComfyUI must be running at `http://localhost:8188` (override with `COMFYUI_ENDPOINT`). No special extensions required — only built-in nodes are used. After generation the tool calls `POST /free` to release VRAM (best-effort).
 
-ComfyUI must be running and reachable at `http://localhost:8188` (override with the `COMFYUI_ENDPOINT` environment variable). No special ComfyUI extensions are required — only built-in nodes are used. After saving the image the tool automatically calls `POST /free` (`unload_models: true, free_memory: true`) to release VRAM; this is best-effort and does not affect the tool's exit code.
-
-**Example — DreamShaper XL Lightning DPM++ SDE:**
+**Single image:**
 
 ```json
 {
@@ -330,7 +328,69 @@ ComfyUI must be running and reachable at `http://localhost:8188` (override with 
 }
 ```
 
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `prompt` | yes | — | Positive prompt. |
+| `outputPath` | yes | — | Absolute path for the output PNG. |
+| `negativePrompt` | no | built-in quality defaults | Things to avoid. |
+| `width` | no | `1024` | Width in pixels (multiple of 8). |
+| `height` | no | `1024` | Height in pixels (multiple of 8). |
+| `steps` | no | `25` | Sampling steps. Use `6`–`8` for Lightning/Turbo models. |
+| `cfg` | no | `7.0` | Guidance scale. Use `1.5`–`2.0` for Lightning/Turbo models. |
+| `seed` | no | random | Fixed seed for reproducibility. |
+| `checkpoint` | no | `COMFYUI_CHECKPOINT` env var | Checkpoint filename in `models/checkpoints/`. |
+| `sampler` | no | `"euler"` | ComfyUI sampler name. |
+| `scheduler` | no | `"normal"` | ComfyUI scheduler name. |
+
+**Bulk image generation:**
+
+Generate multiple images in one call. Shared settings go in `defaults`; per-image fields go in `images[]`. Per-image values override defaults.
+
+```json
+{
+  "defaults": {
+    "checkpoint": "dreamshaperXL_lightningDPMSDE.safetensors",
+    "sampler": "dpmpp_sde",
+    "scheduler": "karras",
+    "steps": 6,
+    "cfg": 2.0
+  },
+  "images": [
+    { "prompt": "knight in armour, pixel art",  "outputPath": "C:/assets/knight.png",  "width": 512,  "height": 512 },
+    { "prompt": "forest level background",      "outputPath": "C:/assets/bg.png",      "width": 1344, "height": 768 },
+    { "prompt": "rogue in shadow, game sprite", "outputPath": "C:/assets/rogue.png",   "width": 512,  "height": 512, "seed": 42 }
+  ]
+}
+```
+
+Images are generated sequentially. Each completed image prints `OK: <path> (<bytes> bytes)` to stdout. VRAM is freed once at the end of the batch.
+
 Place checkpoint `.safetensors` files in ComfyUI's `models/checkpoints/` folder. SDXL-based checkpoints (native 1024×1024) are recommended for the default resolution; if using SD 1.5 checkpoints, set `width` and `height` to `512`.
+
+### file-manager
+
+Performs file system operations: create directories, write text or binary files, read text files, and list directory contents. Intermediate directories are created automatically on write operations.
+
+```json
+{ "operation": "write_text", "path": "C:/output/notes.txt", "content": "hello world" }
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `operation` | yes | See operations table below. |
+| `path` | yes | Absolute path to the file or directory. |
+| `content` | `write_text` only | UTF-8 text content to write. |
+| `contentBase64` | `write_binary` only | Base64-encoded binary content to write. |
+
+| Operation | Description |
+|---|---|
+| `create_directory` | Creates the directory and any missing parents. |
+| `write_text` | Writes a UTF-8 text file, creating parent directories as needed. |
+| `write_binary` | Writes a binary file from a base64 string. |
+| `read_text` | Reads and returns the contents of a text file. |
+| `list_directory` | Returns a JSON array of `{name, type, size}` entries. |
+
+Output: `OK: <path>` on successful write/create; file contents on read; JSON array on list.
 
 ### ollama-stop
 
