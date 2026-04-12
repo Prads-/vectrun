@@ -6,5 +6,5 @@ internal interface IToolDefinition
 {
     string Name { get; }
     AITool ToAITool();
-    Task<string> ExecuteAsync(string arguments, CancellationToken token);
+    Task<string> ExecuteAsync(string arguments, Action<string>? onLog, CancellationToken token);
 }

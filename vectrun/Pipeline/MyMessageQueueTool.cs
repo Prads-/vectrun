@@ -24,7 +24,7 @@ internal class MyMessageQueueTool : IToolDefinition
         }
     };
 
-    public Task<string> ExecuteAsync(string arguments, CancellationToken token)
+    public Task<string> ExecuteAsync(string arguments, Action<string>? onLog, CancellationToken token)
     {
         var args = JsonSerializer.Deserialize<JsonElement>(arguments);
         var agentId = args.GetProperty("agentId").GetString()!;

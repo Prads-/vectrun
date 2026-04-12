@@ -74,13 +74,24 @@ internal class AgentNode : BaseNode<AgentNodeData>
                 };
             }
 
+            if (!string.IsNullOrWhiteSpace(response.Message.Content))
+            {
+                context.Log?.TryWrite(new PipelineLogEntry(
+                    DateTimeOffset.UtcNow,
+                    Id,
+                    Type,
+                    Name,
+                    "output",
+                    response.Message.Content));
+            }
+
             foreach (var toolCall in response.ToolCalls)
             {
                 context.Log?.TryWrite(new PipelineLogEntry(
                     DateTimeOffset.UtcNow, Id, Type, Name, "tool_call",
                     $"{toolCall.Name}({toolCall.Arguments})"));
 
-                var result = await ExecuteTool(toolCall, token);
+                var result = await ExecuteTool(toolCall, context.Log, token);
 
                 context.Log?.TryWrite(new PipelineLogEntry(
                     DateTimeOffset.UtcNow, Id, Type, Name, "tool_result", result));
@@ -124,11 +135,17 @@ internal class AgentNode : BaseNode<AgentNodeData>
         return trimmed[start..].TrimEnd('`');
     }
 
-    private Task<string> ExecuteTool(AIToolCall call, CancellationToken token)
+    private Task<string> ExecuteTool(
+        AIToolCall call,
+        System.Threading.Channels.ChannelWriter<PipelineLogEntry>? log,
+        CancellationToken token)
     {
         if (!_tools.TryGetValue(call.Name, out var tool))
             throw new InvalidOperationException($"Tool not found: {call.Name}");
 
-        return tool.ExecuteAsync(call.Arguments, token);
+        Action<string>? onLog = log == null ? null : line =>
+            log.TryWrite(new PipelineLogEntry(DateTimeOffset.UtcNow, Id, Type, Name, "tool_log", line));
+
+        return tool.ExecuteAsync(call.Arguments, onLog, token);
     }
 }

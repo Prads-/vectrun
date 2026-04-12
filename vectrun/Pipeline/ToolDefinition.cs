@@ -22,6 +22,7 @@ internal class ToolDefinition : IToolDefinition
 
     public async Task<string> ExecuteAsync(
         string arguments,
+        Action<string>? onLog,
         CancellationToken token)
     {
         var psi = new System.Diagnostics.ProcessStartInfo
@@ -29,6 +30,7 @@ internal class ToolDefinition : IToolDefinition
             FileName = Path,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
+            RedirectStandardError = true,
             UseShellExecute = false
         };
 
@@ -38,9 +40,16 @@ internal class ToolDefinition : IToolDefinition
         await process.StandardInput.WriteAsync(arguments);
         process.StandardInput.Close();
 
-        var output = await process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync(token);
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = Task.Run(async () =>
+        {
+            string? line;
+            while ((line = await process.StandardError.ReadLineAsync()) != null)
+                onLog?.Invoke(line);
+        });
 
-        return output;
+        await Task.WhenAll(stdoutTask, stderrTask, process.WaitForExitAsync(token));
+
+        return await stdoutTask;
     }
 }
