@@ -17,9 +17,8 @@ internal static class SpriteSheetGenerator
             var canonicalParams = p with
             {
                 Prompt     = p.CharacterPrompt,
-                Width      = p.FrameWidth,
-                Height     = p.FrameHeight,
                 OutputPath = canonicalPath
+                // Width/Height intentionally not overridden — generate at full model resolution
             };
 
             if (!await ComfyUiClient.GenerateTextToImg(canonicalParams, http, endpoint))
@@ -52,9 +51,8 @@ internal static class SpriteSheetGenerator
                     var frameParams = p with
                     {
                         Prompt     = $"{p.CharacterPrompt}, {anim.Prompt}",
-                        Width      = p.FrameWidth,
-                        Height     = p.FrameHeight,
                         OutputPath = framePath
+                        // Width/Height intentionally not overridden — generate at full model resolution
                         // Seed intentionally not overridden — same seed as canonical for consistency
                     };
 
@@ -83,7 +81,8 @@ internal static class SpriteSheetGenerator
                     Console.Error.WriteLine($"  [sprite_sheet] Warning: could not decode frame ({row},{col}), skipping.");
                     continue;
                 }
-                canvas.DrawBitmap(frameBitmap, col * p.FrameWidth, row * p.FrameHeight);
+                using var resized = frameBitmap.Resize(new SKImageInfo(p.FrameWidth, p.FrameHeight), SKSamplingOptions.Default);
+                canvas.DrawBitmap(resized, col * p.FrameWidth, row * p.FrameHeight);
             }
 
             using var skImage = SKImage.FromBitmap(bitmap);

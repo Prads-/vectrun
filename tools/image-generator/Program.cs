@@ -1,13 +1,16 @@
 using System.Text;
 using System.Text.Json;
 
-// ── Parse stdin ───────────────────────────────────────────────────────────────
+// ── Parse stdin or file arg ───────────────────────────────────────────────────
 
-var stdin = await Console.In.ReadToEndAsync();
+var stdin = args.Length > 0
+    ? (await File.ReadAllTextAsync(args[0])).Replace("\r", "")
+    : (await Console.In.ReadToEndAsync()).Replace("\r", "");
 
 if (string.IsNullOrWhiteSpace(stdin))
 {
-    Console.Error.WriteLine("Usage: echo '<json>' | image-generator");
+    Console.Error.WriteLine("Usage: image-generator <file.json>");
+    Console.Error.WriteLine("       echo '<json>' | image-generator");
     Console.Error.WriteLine("");
     Console.Error.WriteLine("Single image:");
     Console.Error.WriteLine("  { \"prompt\": \"...\", \"outputPath\": \"...\", [negativePrompt, width, height, steps, cfg, seed, checkpoint, sampler, scheduler] }");
@@ -45,9 +48,10 @@ try
             var item = items[i];
             var p = MergeParams(defaults, item);
 
-            if (string.IsNullOrWhiteSpace(p.Prompt))
+            if (p.Type == "sprite_sheet" ? string.IsNullOrWhiteSpace(p.CharacterPrompt) : string.IsNullOrWhiteSpace(p.Prompt))
             {
-                Console.Error.WriteLine($"[{i + 1}/{items.Count}] Missing 'prompt' — skipping.");
+                var field = p.Type == "sprite_sheet" ? "characterPrompt" : "prompt";
+                Console.Error.WriteLine($"[{i + 1}/{items.Count}] Missing '{field}' — skipping.");
                 failed++;
                 continue;
             }
@@ -79,8 +83,8 @@ try
         // Single image mode (backward-compatible)
         var p = MergeParams(default, json);
 
-        if (string.IsNullOrWhiteSpace(p.Prompt))
-        { Console.Error.WriteLine("Missing required field: 'prompt'"); return 1; }
+        if (p.Type == "sprite_sheet" ? string.IsNullOrWhiteSpace(p.CharacterPrompt) : string.IsNullOrWhiteSpace(p.Prompt))
+        { Console.Error.WriteLine($"Missing required field: '{(p.Type == "sprite_sheet" ? "characterPrompt" : "prompt")}'"); return 1; }
 
         if (string.IsNullOrWhiteSpace(p.OutputPath))
         { Console.Error.WriteLine("Missing required field: 'outputPath'"); return 1; }
