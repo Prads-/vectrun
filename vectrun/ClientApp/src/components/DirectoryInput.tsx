@@ -1,35 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { browse } from '../api/browse'
 import type { BrowseEntry } from '../api/browse'
+import { getRecents, addRecent, removeRecent } from '../api/recents'
 
 interface Props {
   value: string
   onChange: (path: string) => void
   onSubmit: () => void
-}
-
-const STORAGE_KEY = 'vectrun_recent_pipelines'
-const MAX_RECENTS = 5
-
-function loadRecents(): string[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') }
-  catch { return [] }
-}
-
-function persistRecents(recents: string[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(recents))
-}
-
-function addRecent(path: string): string[] {
-  const updated = [path, ...loadRecents().filter(r => r !== path)].slice(0, MAX_RECENTS)
-  persistRecents(updated)
-  return updated
-}
-
-function removeRecent(path: string): string[] {
-  const updated = loadRecents().filter(r => r !== path)
-  persistRecents(updated)
-  return updated
 }
 
 export function DirectoryInput({ value, onChange, onSubmit }: Props) {
@@ -41,6 +18,11 @@ export function DirectoryInput({ value, onChange, onSubmit }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [recents, setRecents] = useState<string[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Load recents from the server on mount
+  useEffect(() => {
+    getRecents().then(setRecents)
+  }, [])
 
   const load = useCallback(async (path?: string) => {
     setLoading(true)
@@ -58,7 +40,6 @@ export function DirectoryInput({ value, onChange, onSubmit }: Props) {
   }, [])
 
   function openBrowser() {
-    setRecents(loadRecents())
     setOpen(true)
     load(value || undefined)
   }
@@ -67,21 +48,21 @@ export function DirectoryInput({ value, onChange, onSubmit }: Props) {
     load(path)
   }
 
-  function select(path: string) {
+  async function select(path: string) {
     onChange(path)
-    setRecents(addRecent(path))
+    setRecents(await addRecent(path))
     setOpen(false)
   }
 
-  function handleSubmit() {
-    if (value.trim()) setRecents(addRecent(value.trim()))
+  async function handleSubmit() {
+    if (value.trim()) setRecents(await addRecent(value.trim()))
     setOpen(false)
     onSubmit()
   }
 
-  function handleRemoveRecent(e: React.MouseEvent, path: string) {
+  async function handleRemoveRecent(e: React.MouseEvent, path: string) {
     e.stopPropagation()
-    setRecents(removeRecent(path))
+    setRecents(await removeRecent(path))
   }
 
   // Close on outside click

@@ -10,6 +10,7 @@ if (args.Length == 0)
     builder.Services.AddSingleton<PipelineRunService>();
     builder.Services.AddSingleton<WorkspaceService>();
     builder.Services.AddSingleton<FilesystemService>();
+    builder.Services.AddSingleton<RecentsService>();
 
     builder.Services.AddControllers(opts => opts.Filters.Add<ApiExceptionFilter>())
         .AddJsonOptions(opts =>

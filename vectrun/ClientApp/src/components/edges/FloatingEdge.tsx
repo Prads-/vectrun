@@ -1,11 +1,12 @@
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, useInternalNode } from '@xyflow/react'
+import { BaseEdge, EdgeLabelRenderer, getBezierPath, useInternalNode, Position } from '@xyflow/react'
 import type { EdgeProps } from '@xyflow/react'
 
-// Find where the line from nodeCenter to otherPoint intersects the node's rectangular border.
+// Find where the line from nodeCenter to otherPoint intersects the node's rectangular border,
+// and return which edge (Position) was hit so getBezierPath can curve correctly.
 function getBorderIntersection(
   nodeX: number, nodeY: number, nodeW: number, nodeH: number,
   otherX: number, otherY: number,
-): { x: number; y: number } {
+): { x: number; y: number; position: Position } {
   const cx = nodeX + nodeW / 2
   const cy = nodeY + nodeH / 2
   const hw = nodeW / 2
@@ -13,14 +14,16 @@ function getBorderIntersection(
   const dx = otherX - cx
   const dy = otherY - cy
 
-  if (dx === 0 && dy === 0) return { x: cx, y: cy }
+  if (dx === 0 && dy === 0) return { x: cx, y: cy, position: Position.Bottom }
 
   // Which border does the ray hit first?
-  const scale = Math.abs(dx) * hh > Math.abs(dy) * hw
-    ? hw / Math.abs(dx)   // left or right edge
-    : hh / Math.abs(dy)   // top or bottom edge
+  const hitLR = Math.abs(dx) * hh > Math.abs(dy) * hw
+  const scale = hitLR ? hw / Math.abs(dx) : hh / Math.abs(dy)
+  const position = hitLR
+    ? (dx > 0 ? Position.Right : Position.Left)
+    : (dy > 0 ? Position.Bottom : Position.Top)
 
-  return { x: cx + dx * scale, y: cy + dy * scale }
+  return { x: cx + dx * scale, y: cy + dy * scale, position }
 }
 
 export function FloatingEdge({
@@ -61,8 +64,10 @@ export function FloatingEdge({
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX: sp.x,
     sourceY: sp.y,
+    sourcePosition: sp.position,
     targetX: tp.x,
     targetY: tp.y,
+    targetPosition: tp.position,
   })
 
   return (
