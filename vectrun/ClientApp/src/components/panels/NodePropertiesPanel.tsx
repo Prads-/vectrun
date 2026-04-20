@@ -1,6 +1,7 @@
 import type { AnyFlowNode } from '../../lib/layoutGraph'
 import type { AnyNodeData, AgentNodeData, BranchNodeData, LogicNodeData, WaitNodeData, RetryPolicy } from '../../types/pipeline'
 import type { AgentConfig } from '../../types/workspace'
+import { LuaScriptEditor } from '../LuaScriptEditor'
 
 interface Props {
   selectedNodeId: string | null
@@ -259,11 +260,9 @@ function LogicForm({ data, onChange }: {
       {data.logicType === 'script' && (
         <label className="flex flex-col gap-1">
           <span className="text-xs font-medium text-slate-500">Script</span>
-          <textarea
+          <LuaScriptEditor
             value={data.script ?? ''}
-            onChange={e => onChange({ ...data, script: e.target.value })}
-            rows={6}
-            className="resize-y rounded-lg border border-slate-200 px-3 py-1.5 font-mono text-sm text-slate-700 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            onChange={value => onChange({ ...data, script: value })}
           />
         </label>
       )}
