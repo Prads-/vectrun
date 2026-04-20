@@ -10,7 +10,7 @@ public class BuiltInToolsTests
     public async Task MyMessageQueue_EmptyQueue_ReturnsEmptyString()
     {
         var tool = new MyMessageQueueTool(new AgentMessageQueues());
-        var result = await tool.ExecuteAsync("""{"agentId":"agent1"}""", default);
+        var result = await tool.ExecuteAsync("""{"agentId":"agent1"}""", onLog: null, default);
         Assert.Equal("", result);
     }
 
@@ -21,7 +21,7 @@ public class BuiltInToolsTests
         queues.Enqueue("agent1", "hello");
 
         var tool = new MyMessageQueueTool(queues);
-        var result = await tool.ExecuteAsync("""{"agentId":"agent1"}""", default);
+        var result = await tool.ExecuteAsync("""{"agentId":"agent1"}""", onLog: null, default);
 
         Assert.Equal("hello", result);
         Assert.Null(queues.Dequeue("agent1")); // consumed
@@ -42,7 +42,7 @@ public class BuiltInToolsTests
         var queues = new AgentMessageQueues();
         var tool = new QueueMessageTool(queues);
 
-        await tool.ExecuteAsync("""{"agentId":"agent1","message":"hi there"}""", default);
+        await tool.ExecuteAsync("""{"agentId":"agent1","message":"hi there"}""", onLog: null, default);
 
         Assert.Equal("hi there", queues.Dequeue("agent1"));
     }
@@ -51,7 +51,7 @@ public class BuiltInToolsTests
     public async Task QueueMessage_ReturnsOk()
     {
         var tool = new QueueMessageTool(new AgentMessageQueues());
-        var result = await tool.ExecuteAsync("""{"agentId":"agent1","message":"msg"}""", default);
+        var result = await tool.ExecuteAsync("""{"agentId":"agent1","message":"msg"}""", onLog: null, default);
         Assert.Equal("ok", result);
     }
 

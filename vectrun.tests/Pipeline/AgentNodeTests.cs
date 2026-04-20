@@ -80,11 +80,11 @@ public class AgentNodeTests
         
         tool.Name.Returns("mytool");
         tool.ToAITool().Returns(new AITool { Name = "mytool", Description = "d", Parameters = new { } });
-        tool.ExecuteAsync("{}", Arg.Any<CancellationToken>()).Returns("tool result");
+        tool.ExecuteAsync("{}", Arg.Any<Action<string>?>(), Arg.Any<CancellationToken>()).Returns("tool result");
 
         var callCount = 0;
         var client = Substitute.For<IAIClient>();
-        
+
         client.SendAsync(Arg.Any<AIChatRequest>(), Arg.Any<CancellationToken>())
             .Returns(_ => callCount++ == 0
                 ? new AIChatResponse
@@ -106,7 +106,7 @@ public class AgentNodeTests
             .ExecuteAsync(new NodeExecutionContext { Input = "hi" }, default);
 
         Assert.Equal("final", result.Output);
-        await tool.Received(1).ExecuteAsync("{}", Arg.Any<CancellationToken>());
+        await tool.Received(1).ExecuteAsync("{}", Arg.Any<Action<string>?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public class AgentNodeTests
         var tool = Substitute.For<IToolDefinition>();
         tool.Name.Returns("mytool");
         tool.ToAITool().Returns(new AITool { Name = "mytool", Description = "d", Parameters = new { } });
-        tool.ExecuteAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns("tool output");
+        tool.ExecuteAsync(Arg.Any<string>(), Arg.Any<Action<string>?>(), Arg.Any<CancellationToken>()).Returns("tool output");
 
         var callCount = 0;
         var client = Substitute.For<IAIClient>();
@@ -191,7 +191,7 @@ public class AgentNodeTests
         var tool = Substitute.For<IToolDefinition>();
         tool.Name.Returns("t");
         tool.ToAITool().Returns(new AITool { Name = "t", Description = "d", Parameters = new { } });
-        tool.ExecuteAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns("r");
+        tool.ExecuteAsync(Arg.Any<string>(), Arg.Any<Action<string>?>(), Arg.Any<CancellationToken>()).Returns("r");
 
         var callCount = 0;
         var client = Substitute.For<IAIClient>();
@@ -348,7 +348,7 @@ public class AgentNodeTests
         var tool = Substitute.For<IToolDefinition>();
         tool.Name.Returns("mytool");
         tool.ToAITool().Returns(new AITool { Name = "mytool", Description = "d", Parameters = new { } });
-        tool.ExecuteAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns("r");
+        tool.ExecuteAsync(Arg.Any<string>(), Arg.Any<Action<string>?>(), Arg.Any<CancellationToken>()).Returns("r");
 
         var callCount = 0;
         var client = Substitute.For<IAIClient>();
@@ -376,7 +376,7 @@ public class AgentNodeTests
         
         tool.Name.Returns("mytool");
         tool.ToAITool().Returns(new AITool { Name = "mytool", Description = "d", Parameters = new { } });
-        tool.ExecuteAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns("tool output");
+        tool.ExecuteAsync(Arg.Any<string>(), Arg.Any<Action<string>?>(), Arg.Any<CancellationToken>()).Returns("tool output");
 
         // Snapshot the messages on the second call, before the loop mutates again
         List<AIMessage>? secondCallSnapshot = null;

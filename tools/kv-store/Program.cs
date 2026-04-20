@@ -19,7 +19,7 @@ else
     var stdin = await Console.In.ReadToEndAsync();
     if (string.IsNullOrWhiteSpace(stdin))
     {
-        Console.Error.WriteLine("Usage: kv-store <read|write|update|delete|append> <namespace> <key> [value]");
+        Console.Error.WriteLine("Usage: kv-store <read|write|update|delete|delete_prefix|append> <namespace> <key> [value]");
         Console.Error.WriteLine("  OR:  echo '{\"operation\":\"write\",\"namespace\":\"ns\",\"key\":\"k\",\"value\":\"v\"}' | kv-store");
         return 1;
     }
@@ -40,15 +40,17 @@ if (string.IsNullOrWhiteSpace(operation) || string.IsNullOrWhiteSpace(ns) || str
 var dataDir  = Path.Combine(AppContext.BaseDirectory, "data");
 var nsDir    = Path.Combine(dataDir, SanitizeName(ns));
 var keyFile  = Path.Combine(nsDir, HashKey(key));
+var keyNameFile = keyFile + ".key";
 
 return operation switch
 {
-    "read"   => Read(keyFile),
-    "write"  => Write(nsDir, keyFile, cliValue),
-    "update" => Update(nsDir, keyFile, cliValue),
-    "delete" => Delete(keyFile),
-    "append" => Append(nsDir, keyFile, cliValue, separator),
-    _        => UnknownOperation(operation)
+    "read"          => Read(keyFile),
+    "write"         => Write(nsDir, keyFile, keyNameFile, key, cliValue),
+    "update"        => Update(nsDir, keyFile, keyNameFile, key, cliValue),
+    "delete"        => Delete(keyFile, keyNameFile),
+    "delete_prefix" => DeletePrefix(nsDir, key),
+    "append"        => Append(nsDir, keyFile, keyNameFile, key, cliValue, separator),
+    _               => UnknownOperation(operation)
 };
 
 // ── Operations ────────────────────────────────────────────────────────────────
@@ -75,7 +77,7 @@ static int Read(string keyFile)
     }
 }
 
-static int Write(string nsDir, string keyFile, string? value)
+static int Write(string nsDir, string keyFile, string keyNameFile, string key, string? value)
 {
     if (value is null)
     {
@@ -83,10 +85,10 @@ static int Write(string nsDir, string keyFile, string? value)
         return 1;
     }
 
-    return PersistValue(nsDir, keyFile, value);
+    return PersistValue(nsDir, keyFile, keyNameFile, key, value);
 }
 
-static int Update(string nsDir, string keyFile, string? value)
+static int Update(string nsDir, string keyFile, string keyNameFile, string key, string? value)
 {
     if (value is null)
     {
@@ -94,20 +96,15 @@ static int Update(string nsDir, string keyFile, string? value)
         return 1;
     }
 
-    return PersistValue(nsDir, keyFile, value);
+    return PersistValue(nsDir, keyFile, keyNameFile, key, value);
 }
 
-static int Delete(string keyFile)
+static int Delete(string keyFile, string keyNameFile)
 {
-    if (!File.Exists(keyFile))
-    {
-        Console.WriteLine("OK");
-        return 0;
-    }
-
     try
     {
-        File.Delete(keyFile);
+        if (File.Exists(keyFile)) File.Delete(keyFile);
+        if (File.Exists(keyNameFile)) File.Delete(keyNameFile);
         Console.WriteLine("OK");
         return 0;
     }
@@ -118,7 +115,49 @@ static int Delete(string keyFile)
     }
 }
 
-static int Append(string nsDir, string keyFile, string? value, string separator)
+static int DeletePrefix(string nsDir, string prefix)
+{
+    if (!Directory.Exists(nsDir))
+    {
+        Console.WriteLine("0");
+        return 0;
+    }
+
+    var deleted = 0;
+    try
+    {
+        foreach (var sidecar in Directory.EnumerateFiles(nsDir, "*.key"))
+        {
+            string storedKey;
+            try
+            {
+                storedKey = File.ReadAllText(sidecar, Encoding.UTF8);
+            }
+            catch (IOException)
+            {
+                continue;
+            }
+
+            if (!storedKey.StartsWith(prefix, StringComparison.Ordinal))
+                continue;
+
+            var valueFile = sidecar[..^".key".Length];
+            if (File.Exists(valueFile)) File.Delete(valueFile);
+            File.Delete(sidecar);
+            deleted++;
+        }
+
+        Console.WriteLine(deleted);
+        return 0;
+    }
+    catch (IOException ex)
+    {
+        Console.Error.WriteLine($"Error deleting keys by prefix: {ex.Message}");
+        return 1;
+    }
+}
+
+static int Append(string nsDir, string keyFile, string keyNameFile, string key, string? value, string separator)
 {
     if (value is null)
     {
@@ -127,7 +166,7 @@ static int Append(string nsDir, string keyFile, string? value, string separator)
     }
 
     if (!File.Exists(keyFile))
-        return PersistValue(nsDir, keyFile, value);
+        return PersistValue(nsDir, keyFile, keyNameFile, key, value);
 
     try
     {
@@ -136,7 +175,7 @@ static int Append(string nsDir, string keyFile, string? value, string separator)
         using (var sr = new StreamReader(fs, Encoding.UTF8))
             existing = sr.ReadToEnd();
 
-        return PersistValue(nsDir, keyFile, existing + separator + value);
+        return PersistValue(nsDir, keyFile, keyNameFile, key, existing + separator + value);
     }
     catch (IOException ex)
     {
@@ -147,21 +186,26 @@ static int Append(string nsDir, string keyFile, string? value, string separator)
 
 static int UnknownOperation(string operation)
 {
-    Console.Error.WriteLine($"Unknown operation '{operation}'. Must be: read, write, update, delete, append.");
+    Console.Error.WriteLine($"Unknown operation '{operation}'. Must be: read, write, update, delete, delete_prefix, append.");
     return 1;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-static int PersistValue(string nsDir, string keyFile, string value)
+static int PersistValue(string nsDir, string keyFile, string keyNameFile, string key, string value)
 {
+    // Write sidecar first so a mid-write failure leaves a recoverable state: an orphan
+    // sidecar (no value file) is swept by delete_prefix on the next run. The reverse
+    // order would leak an invisible value file that delete_prefix cannot see.
     try
     {
         Directory.CreateDirectory(nsDir);
 
-        using var fs = new FileStream(keyFile, FileMode.Create, FileAccess.Write, FileShare.None);
-        using var sw = new StreamWriter(fs, Encoding.UTF8);
-        sw.Write(value);
+        File.WriteAllText(keyNameFile, key, Encoding.UTF8);
+
+        using (var fs = new FileStream(keyFile, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var sw = new StreamWriter(fs, Encoding.UTF8))
+            sw.Write(value);
 
         Console.WriteLine("OK");
         return 0;

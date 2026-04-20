@@ -81,7 +81,7 @@ internal static class PipelineBuilder
         {
             "agent" => BuildAgentNode(node.Id, data.Deserialize<AgentNodeData>(JsonOptions)!, models, tools, agents, queues),
             "branch" => new BranchNode(node.Id, data.Deserialize<BranchNodeData>(JsonOptions)!),
-            "logic" => new LogicNode(node.Id, ResolveLogicNodeData(data.Deserialize<LogicNodeData>(JsonOptions)!, directory)),
+            "logic" => new LogicNode(node.Id, ResolveLogicNodeData(data.Deserialize<LogicNodeData>(JsonOptions)!, directory), tools),
             "wait" => new WaitNode(node.Id, data.Deserialize<WaitNodeData>(JsonOptions)!),
             _ => throw new InvalidOperationException($"Unknown node type: {node.Type}")
         };
