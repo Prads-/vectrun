@@ -6,6 +6,7 @@ using System.Text.Json;
 //   Pipeline: echo '{"projectDirectory":"...","requirements":"..."}' | scaffold-claude
 string projectDir;
 string requirements;
+string? model = null;
 
 if (args.Length > 0)
 {
@@ -21,12 +22,12 @@ if (args.Length > 0)
 }
 else
 {
-    // Pipeline mode: both fields from JSON stdin
+    // Pipeline mode: both required fields + optional 'model' from JSON stdin
     var stdin = await Console.In.ReadToEndAsync();
     if (string.IsNullOrWhiteSpace(stdin))
     {
         Console.Error.WriteLine("Usage: scaffold-claude <project-directory>  (requirements via stdin)");
-        Console.Error.WriteLine("  OR:  echo '{\"projectDirectory\":\"...\",\"requirements\":\"...\"}' | scaffold-claude");
+        Console.Error.WriteLine("  OR:  echo '{\"projectDirectory\":\"...\",\"requirements\":\"...\",\"model\":\"claude-sonnet-4-6\"}' | scaffold-claude");
         return 1;
     }
 
@@ -45,6 +46,12 @@ else
 
     projectDir   = Path.GetFullPath(dirProp.GetString()!);
     requirements = reqProp.GetString()!;
+
+    if (json.TryGetProperty("model", out var modelProp))
+    {
+        var m = modelProp.GetString();
+        if (!string.IsNullOrWhiteSpace(m)) model = m.Trim();
+    }
 }
 
 var projectName = Path.GetFileName(projectDir);
@@ -68,21 +75,35 @@ const string prompt =
     "Do not stop until every item is checked off. " +
     "When all items are done, print a short summary of what was built and where the entry point is.";
 
+// Spawn Claude in a NEW visible console window so the user can watch its work live.
+// scaffold-claude itself runs inside vectrun's pipeline with stdin/stdout piped, so it
+// has no attached terminal. We use cmd.exe with UseShellExecute=true, which triggers
+// ShellExecuteEx and allocates a fresh console for the child process.
+//
+// The inner command is `claude <args> & pause`. The `& pause` keeps the window open
+// after Claude exits so the user can read the final output before closing it. When
+// the user presses a key, cmd exits, WaitForExit returns here, and the pipeline
+// continues with Claude's exit code propagated back.
+var safePrompt = EscapeForCmdDoubleQuoted(prompt);
+var modelFlag  = string.IsNullOrWhiteSpace(model)
+    ? ""
+    : $"--model \\\"{EscapeForCmdDoubleQuoted(model!)}\\\" ";
+var cmdArgs    = $"/C \"claude {modelFlag}--dangerously-skip-permissions -p \\\"{safePrompt}\\\" & pause\"";
+
+await Console.Error.WriteLineAsync(
+    string.IsNullOrWhiteSpace(model)
+        ? "Model: (claude default)"
+        : $"Model: {model}");
+
 var psi = new ProcessStartInfo
 {
-    FileName               = "claude",
-    WorkingDirectory       = projectDir,
-    UseShellExecute        = false,
-    RedirectStandardOutput = true,
-    RedirectStandardError  = true,
+    FileName         = "cmd.exe",
+    Arguments        = cmdArgs,
+    UseShellExecute  = true,
+    WorkingDirectory = projectDir,
 };
-psi.ArgumentList.Add("--dangerously-skip-permissions");
-psi.ArgumentList.Add("--output-format");
-psi.ArgumentList.Add("stream-json");
-psi.ArgumentList.Add("-p");
-psi.ArgumentList.Add(prompt);
 
-await Console.Error.WriteLineAsync("Launching Claude Code...");
+await Console.Error.WriteLineAsync("Launching Claude Code in a new terminal window...");
 
 Process process;
 try
@@ -100,26 +121,6 @@ catch (Exception ex)
 
 using (process)
 {
-    // Drain stderr in background to prevent pipe deadlock
-    var stderrTask = Task.Run(async () =>
-    {
-        string? line;
-        while ((line = await process.StandardError.ReadLineAsync()) is not null)
-            await Console.Error.WriteLineAsync($"[stderr] {line}");
-    });
-
-    // Read stream-json events from stdout and forward as human-readable lines to stderr.
-    // Each line is a JSON object; we extract text content so the vectrun output panel
-    // shows what Claude is doing in real-time rather than waiting until the end.
-    string? line;
-    while ((line = await process.StandardOutput.ReadLineAsync()) is not null)
-    {
-        var readable = ParseStreamJsonLine(line);
-        if (readable is not null)
-            await Console.Error.WriteLineAsync(readable);
-    }
-
-    await stderrTask;
     await process.WaitForExitAsync();
 
     await Console.Error.WriteLineAsync($"Claude Code exited with code {process.ExitCode}.");
@@ -130,63 +131,44 @@ using (process)
     return process.ExitCode;
 }
 
-// ── stream-json line parser ───────────────────────────────────────────────────
+// ── Cmd argument escaping ─────────────────────────────────────────────────────
 
-static string? ParseStreamJsonLine(string line)
+// Prepares a string for inclusion inside a double-quoted segment of a cmd.exe command line
+// that will be passed on to a child process whose arg parser follows the standard CRT rules:
+//   backslash before a quote escapes the quote; a lone backslash is preserved.
+// We therefore escape only double-quotes (→ \") and runs of backslashes that immediately
+// precede a double-quote (each backslash → \\). Other characters pass through untouched,
+// since cmd does not reinterpret them inside a /C "..." wrapper.
+static string EscapeForCmdDoubleQuoted(string input)
 {
-    if (string.IsNullOrWhiteSpace(line)) return null;
+    var sb = new System.Text.StringBuilder(input.Length + 16);
+    var backslashes = 0;
 
-    try
+    foreach (var c in input)
     {
-        var doc = JsonSerializer.Deserialize<JsonElement>(line);
-
-        if (!doc.TryGetProperty("type", out var typeProp)) return line;
-        var type = typeProp.GetString();
-
-        switch (type)
+        if (c == '\\')
         {
-            case "assistant":
-            {
-                // Extract text content blocks from the assistant message
-                if (!doc.TryGetProperty("message", out var msg)) break;
-                if (!msg.TryGetProperty("content", out var content)) break;
-
-                var texts = new System.Text.StringBuilder();
-                foreach (var block in content.EnumerateArray())
-                {
-                    if (!block.TryGetProperty("type", out var bt)) continue;
-                    if (bt.GetString() == "text" && block.TryGetProperty("text", out var txt))
-                        texts.AppendLine(txt.GetString());
-                    else if (bt.GetString() == "tool_use" && block.TryGetProperty("name", out var toolName))
-                        texts.AppendLine($"[tool] {toolName.GetString()}");
-                }
-                var result = texts.ToString().Trim();
-                return result.Length > 0 ? result : null;
-            }
-
-            case "result":
-            {
-                if (doc.TryGetProperty("result", out var res))
-                    return $"[done] {res.GetString()}";
-                break;
-            }
-
-            case "system":
-                // Suppress system/init noise
-                return null;
-
-            default:
-                // Unknown event type — skip silently
-                return null;
+            backslashes++;
+            continue;
         }
-    }
-    catch
-    {
-        // Not valid JSON — write raw
-        return line;
+
+        if (c == '"')
+        {
+            // Double the pending backslashes (so they stay literal in the child), then escape the quote.
+            sb.Append('\\', backslashes * 2);
+            sb.Append('\\').Append('"');
+        }
+        else
+        {
+            sb.Append('\\', backslashes);
+            sb.Append(c);
+        }
+
+        backslashes = 0;
     }
 
-    return null;
+    sb.Append('\\', backslashes);
+    return sb.ToString();
 }
 
 // ── CLAUDE.md builder ─────────────────────────────────────────────────────────

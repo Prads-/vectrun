@@ -1,18 +1,46 @@
 using System.Text;
 using System.Text.Json;
+using SkiaSharp;
 
 internal static class ComfyUiClient
 {
+    // SDXL-class models can't usefully generate below ~512 px; anything tinier comes
+    // out as noise. We always generate at ≥ this on the smaller side, then downscale
+    // the saved PNG to whatever the caller asked for.
+    private const int MinGenDimension = 512;
+    private const int MaxGenDimension = 2048;
+
+    // If the caller asks for a size smaller than the model can reliably produce,
+    // scale UP preserving aspect ratio until the shorter side hits the minimum,
+    // round to the nearest multiple of 8, and cap the longer side at the maximum.
+    // Returns the generation dims and whether a post-generation resize is needed.
+    private static (int GenW, int GenH, bool NeedsResize) ResolveGenSize(int requestedW, int requestedH)
+    {
+        if (requestedW >= MinGenDimension && requestedH >= MinGenDimension)
+            return (requestedW, requestedH, false);
+
+        var scale = (double)MinGenDimension / Math.Min(requestedW, requestedH);
+        var genW  = (int)Math.Round(requestedW * scale);
+        var genH  = (int)Math.Round(requestedH * scale);
+
+        genW = Math.Min(MaxGenDimension, ((genW + 7) / 8) * 8);
+        genH = Math.Min(MaxGenDimension, ((genH + 7) / 8) * 8);
+
+        return (genW, genH, true);
+    }
+
     // ── Text-to-image ─────────────────────────────────────────────────────────
 
     internal static async Task<bool> GenerateTextToImg(ImageParams p, HttpClient http, string endpoint)
     {
+        var (genW, genH, needsResize) = ResolveGenSize(p.Width, p.Height);
+
         var workflow = new Dictionary<string, object>
         {
             ["1"] = new { class_type = "CheckpointLoaderSimple", inputs = new { ckpt_name = p.Checkpoint } },
             ["2"] = new { class_type = "CLIPTextEncode",         inputs = new { text = p.Prompt,         clip = new object[] { "1", 1 } } },
             ["3"] = new { class_type = "CLIPTextEncode",         inputs = new { text = p.NegativePrompt, clip = new object[] { "1", 1 } } },
-            ["4"] = new { class_type = "EmptyLatentImage",       inputs = new { width = p.Width, height = p.Height, batch_size = 1 } },
+            ["4"] = new { class_type = "EmptyLatentImage",       inputs = new { width = genW, height = genH, batch_size = 1 } },
             ["5"] = new
             {
                 class_type = "KSampler",
@@ -34,7 +62,7 @@ internal static class ComfyUiClient
             ["7"] = new { class_type = "SaveImage", inputs = new { filename_prefix = "vectrun", images = new object[] { "6", 0 } } }
         };
 
-        return await QueueAndSave(workflow, p, http, endpoint);
+        return await QueueAndSave(workflow, p, http, endpoint, needsResize ? (p.Width, p.Height) : null);
     }
 
     // ── Image-to-image ────────────────────────────────────────────────────────
@@ -93,12 +121,14 @@ internal static class ComfyUiClient
         var ipAdapterModel  = Environment.GetEnvironmentVariable("IPADAPTER_MODEL")    ?? "ip-adapter_sdxl.bin";
         var clipVisionModel = Environment.GetEnvironmentVariable("CLIP_VISION_MODEL") ?? "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors";
 
+        var (genW, genH, needsResize) = ResolveGenSize(p.Width, p.Height);
+
         var workflow = new Dictionary<string, object>
         {
             ["1"]  = new { class_type = "CheckpointLoaderSimple", inputs = new { ckpt_name = p.Checkpoint } },
             ["2"]  = new { class_type = "CLIPTextEncode",         inputs = new { text = p.Prompt,         clip = new object[] { "1", 1 } } },
             ["3"]  = new { class_type = "CLIPTextEncode",         inputs = new { text = p.NegativePrompt, clip = new object[] { "1", 1 } } },
-            ["4"]  = new { class_type = "EmptyLatentImage",       inputs = new { width = p.Width, height = p.Height, batch_size = 1 } },
+            ["4"]  = new { class_type = "EmptyLatentImage",       inputs = new { width = genW, height = genH, batch_size = 1 } },
             ["5"]  = new
             {
                 class_type = "KSampler",
@@ -140,7 +170,7 @@ internal static class ComfyUiClient
             }
         };
 
-        return await QueueAndSave(workflow, p, http, endpoint);
+        return await QueueAndSave(workflow, p, http, endpoint, needsResize ? (p.Width, p.Height) : null);
     }
 
     // ── Upload reference image ────────────────────────────────────────────────
@@ -181,7 +211,7 @@ internal static class ComfyUiClient
 
     // ── Shared: queue → poll → download → save ────────────────────────────────
 
-    private static async Task<bool> QueueAndSave(Dictionary<string, object> workflow, ImageParams p, HttpClient http, string endpoint)
+    private static async Task<bool> QueueAndSave(Dictionary<string, object> workflow, ImageParams p, HttpClient http, string endpoint, (int Width, int Height)? resizeTarget = null)
     {
         var clientId  = Guid.NewGuid().ToString("N");
         var queueBody = JsonSerializer.Serialize(new { prompt = workflow, client_id = clientId });
@@ -239,6 +269,12 @@ internal static class ComfyUiClient
         try   { imageBytes = await http.GetByteArrayAsync(viewUrl); }
         catch (Exception ex) { Console.Error.WriteLine($"  Failed to download: {ex.Message}"); return false; }
 
+        if (resizeTarget is (int targetW, int targetH))
+        {
+            try   { imageBytes = ResizePng(imageBytes, targetW, targetH); }
+            catch (Exception ex) { Console.Error.WriteLine($"  Failed to resize: {ex.Message}"); return false; }
+        }
+
         var outputPath = Path.GetFullPath(p.OutputPath);
         try
         {
@@ -249,5 +285,18 @@ internal static class ComfyUiClient
 
         Console.WriteLine($"OK: {outputPath} ({imageBytes.Length} bytes)");
         return true;
+    }
+
+    private static byte[] ResizePng(byte[] pngBytes, int targetW, int targetH)
+    {
+        using var src = SKBitmap.Decode(pngBytes);
+        if (src is null) throw new InvalidOperationException("Could not decode PNG for resize.");
+
+        var info = new SKImageInfo(targetW, targetH, src.ColorType, src.AlphaType);
+        using var dst = src.Resize(info, SKSamplingOptions.Default)
+                        ?? throw new InvalidOperationException("SkiaSharp resize returned null.");
+        using var image = SKImage.FromBitmap(dst);
+        using var data  = image.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
     }
 }
