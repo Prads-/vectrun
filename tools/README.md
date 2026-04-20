@@ -61,7 +61,7 @@ A simple file-backed key-value store. Data is persisted in a `data/` directory n
 ### CLI
 
 ```bash
-kv-store <read|write|update|delete> <namespace> <key> [value]
+kv-store <read|write|update|delete|delete_prefix|append> <namespace> <key> [value]
 ```
 
 ### Pipeline (stdin JSON)
@@ -70,25 +70,37 @@ kv-store <read|write|update|delete> <namespace> <key> [value]
 { "operation": "write", "namespace": "game_dev", "key": "research_report", "value": "..." }
 ```
 
-| Field       | Required         | Description                                         |
-|-------------|------------------|-----------------------------------------------------|
-| `operation` | Yes              | `read`, `write`, `update`, or `delete`              |
-| `namespace` | Yes              | Groups related keys (e.g. `game_dev`)               |
-| `key`       | Yes              | Arbitrary string key                                |
-| `value`     | write/update only| The value to store                                  |
+| Field       | Required                  | Description                                                                 |
+|-------------|---------------------------|-----------------------------------------------------------------------------|
+| `operation` | Yes                       | `read`, `write`, `update`, `delete`, `delete_prefix`, or `append`           |
+| `namespace` | Yes                       | Groups related keys (e.g. `game_dev`)                                       |
+| `key`       | Yes                       | Arbitrary string key (or prefix, for `delete_prefix`)                       |
+| `value`     | write/update/append only  | The value to store                                                          |
+| `separator` | append only (optional)    | String inserted between existing and new value (default `"\n\n---\n\n"`)    |
 
 ### Operations
 
-| Operation | Behaviour                                                        |
-|-----------|------------------------------------------------------------------|
-| `write`   | Creates or overwrites a key (upsert).                            |
-| `read`    | Returns the stored value. Returns empty string (exit 0) if key does not exist. |
-| `update`  | Creates or overwrites a key (upsert). Identical to `write`.      |
-| `delete`  | Removes the key. Succeeds silently if the key does not exist.    |
+| Operation       | Behaviour                                                                                          |
+|-----------------|----------------------------------------------------------------------------------------------------|
+| `write`         | Creates or overwrites a key (upsert).                                                              |
+| `read`          | Returns the stored value. Returns empty string (exit 0) if key does not exist.                     |
+| `update`        | Creates or overwrites a key (upsert). Identical to `write`.                                        |
+| `delete`        | Removes the key. Succeeds silently if the key does not exist.                                      |
+| `append`        | Appends `value` to the existing entry with a separator between them. Creates the key if absent.    |
+| `delete_prefix` | Deletes every key in the namespace whose name starts with the given prefix. Prints count deleted.  |
 
 ### Output
 
-`OK` on success for write/update/delete. The stored value on read.
+`OK` on success for write/update/append/delete. The number of deleted entries (plain integer) for `delete_prefix`. The stored value on read.
+
+### Storage layout
+
+For each key, two files are written into `data/<namespace>/`:
+
+- `<sha256-of-key>` — the value file (filename is a safe hex hash of the key).
+- `<sha256-of-key>.key` — a plain-text sidecar containing the original key string.
+
+The sidecar is what makes `delete_prefix` possible — it lets the tool recover the original key from the hashed filename. The sidecar is written **before** the value file, so a mid-write crash leaves an orphan sidecar that the next `delete_prefix` call sweeps up automatically.
 
 ---
 

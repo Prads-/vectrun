@@ -152,7 +152,7 @@ Both `pathType` options are configurable in the web editor's **Tools** panel, wh
 |---|---|
 | **agent** | Sends a request to an AI model. Runs a tool-calling loop until the model stops calling tools. |
 | **branch** | Compares input to `expectedOutput` (optional). Routes to `trueNodeIds` on match, `falseNodeIds` on mismatch. If `expectedOutput` is omitted, always routes to `trueNodeIds`. |
-| **logic** | Runs an external process (`logicType: "process"`) or an embedded Lua script (`logicType: "script"`). Input via stdin, output from stdout or return value. A process fails if it exits with a non-zero code or writes anything to stderr. Set `processPathType` to `"relative"` (default, resolved relative to the pipeline folder) or `"absolute"`. |
+| **logic** | Runs an external process (`logicType: "process"`) or an embedded Lua script (`logicType: "script"`). For processes: input via stdin, output from stdout; fails on non-zero exit or anything written to stderr. Set `processPathType` to `"relative"` (default, resolved relative to the pipeline folder) or `"absolute"`. For scripts: input is exposed as the Lua global `input`; every tool in `tools.json` is exposed as a Lua global function; the script's return value becomes the node output. |
 | **wait** | Sleeps for `durationMs` milliseconds, then passes input through unchanged. |
 
 ### Logic node — `processInput` and `{PREVIOUS_AGENT_OUTPUT}`
@@ -178,6 +178,26 @@ To inject the previous node's output into a structured payload, use the `{PREVIO
 At runtime `{PREVIOUS_AGENT_OUTPUT}` is replaced with the previous node's output, properly escaped. This is the recommended pattern for reliably writing dynamic data (e.g. agent-generated summaries) to a tool without relying on the agent to make the tool call itself.
 
 `{PREVIOUS_AGENT_OUTPUT}` is configurable in the **Node Properties** panel in the web editor — the process input hint documents the substitution inline.
+
+### Logic node — Lua scripting
+
+Set `logicType` to `"script"` and provide a `script` field containing Lua code. The previous node's output is available as the global `input`, and every entry in `tools.json` is exposed as a Lua function of the same name. The script's return value becomes the node output — return a string or `nil`.
+
+```json
+{
+  "id": "init-run",
+  "type": "logic",
+  "data": {
+    "logicType": "script",
+    "script": "kv_store({ operation = 'delete_prefix', namespace = 'game_dev', key = '' })\nreturn input",
+    "nextNodeIds": ["next"]
+  }
+}
+```
+
+Tool functions accept either a table (auto-converted to JSON — array-like tables become JSON arrays, hash-like tables become objects) or a string (passed through verbatim). The return value is the tool's stdout as a Lua string. Anything the tool writes to stderr flows into the live output console as a `tool_log` event, just like it does for agent-invoked tools.
+
+Tool names that collide with Lua keywords or contain special characters should be renamed in `tools.json` — the global is created with the exact name string.
 
 All node types support an optional `name` field for human-readable labelling.
 
@@ -235,6 +255,7 @@ Clicking **Run** streams log entries in real time to a collapsible output panel 
 | `output` | A node completes and emits its result |
 | `tool_call` | An agent node invokes a tool |
 | `tool_result` | The tool returns a result |
+| `tool_log` | A tool wrote a line to stderr (streamed live while the tool runs) |
 | `retry` | A node failed and is being retried (includes attempt number and error) |
 | `failed` | A node has exhausted all retries |
 | `branch_failed` | A branch stopped due to an unrecoverable node failure |
@@ -279,12 +300,15 @@ Uses bot-detection mitigations: realistic Chrome user-agent, `AutomationControll
 A lightweight, disk-backed key-value store. Data is written to `data/<namespace>/<key-hash>` files next to the executable, so it persists across pipeline runs without any external service.
 
 ```
-kv-store write  <namespace> <key> <value>   # upsert — creates or overwrites
-kv-store update <namespace> <key> <value>   # overwrite (fails if key absent)
-kv-store read   <namespace> <key>           # print value to stdout; empty string if not found (exit 0)
-kv-store delete <namespace> <key>           # remove entry; no-op if absent (exit 0)
-kv-store append <namespace> <key> <value>   # append to existing value with separator; create if absent
+kv-store write         <namespace> <key>    <value>   # upsert — creates or overwrites
+kv-store update        <namespace> <key>    <value>   # upsert (same as write)
+kv-store read          <namespace> <key>              # print value to stdout; empty string if not found (exit 0)
+kv-store delete        <namespace> <key>              # remove entry; no-op if absent (exit 0)
+kv-store append        <namespace> <key>    <value>   # append to existing value with separator; create if absent
+kv-store delete_prefix <namespace> <prefix>           # delete every key whose name starts with <prefix>; prints count deleted
 ```
+
+`delete_prefix` is useful at the start of a pipeline run to wipe a whole slice of state (e.g. all keys under a `run_` prefix) without having to enumerate them. Pass an empty string as the prefix to wipe the whole namespace. It uses `.key` sidecar files written alongside each hashed value file to resolve the original key name.
 
 Namespaces keep agents isolated — each agent can read and write its own namespace without colliding with others. Keys are hashed (SHA-256) so any string is a valid key.
 
