@@ -67,9 +67,9 @@ internal static class ComfyUiClient
 
     // ── Image-to-image ────────────────────────────────────────────────────────
 
-    internal static async Task<bool> GenerateImgToImg(ImageParams p, string referenceImagePath, HttpClient http, string endpoint)
+    internal static async Task<bool> GenerateImgToImg(ImageParams p, HttpClient http, string endpoint)
     {
-        var uploadedName = await UploadImage(referenceImagePath, http, endpoint);
+        var uploadedName = await UploadImage(p.ReferenceImage, http, endpoint);
         if (uploadedName is null)
         {
             Console.Error.WriteLine("  Failed to upload reference image to ComfyUI.");
@@ -109,9 +109,9 @@ internal static class ComfyUiClient
 
     // ── IPAdapter ─────────────────────────────────────────────────────────────
 
-    internal static async Task<bool> GenerateWithIPAdapter(ImageParams p, string referenceImagePath, HttpClient http, string endpoint)
+    internal static async Task<bool> GenerateWithIPAdapter(ImageParams p, HttpClient http, string endpoint)
     {
-        var uploadedName = await UploadImage(referenceImagePath, http, endpoint);
+        var uploadedName = await UploadImage(p.ReferenceImage, http, endpoint);
         if (uploadedName is null)
         {
             Console.Error.WriteLine("  Failed to upload reference image to ComfyUI.");
@@ -166,6 +166,70 @@ internal static class ComfyUiClient
                     start_at       = 0.0,
                     end_at         = 1.0,
                     embeds_scaling = "V only"
+                }
+            }
+        };
+
+        return await QueueAndSave(workflow, p, http, endpoint, needsResize ? (p.Width, p.Height) : null);
+    }
+
+    // ── ControlNet (structure-preserving text-to-image) ───────────────────────
+    //
+    // Runs a text-to-image generation whose composition is locked to the edges
+    // of a reference image. Typical use: rasterize a Claude-designed SVG and
+    // feed it here so Stable Diffusion renders a detailed sprite that preserves
+    // the exact pose, silhouette, and proportions of the SVG.
+
+    internal static async Task<bool> GenerateWithControlNet(ImageParams p, HttpClient http, string endpoint)
+    {
+        var uploadedName = await UploadImage(p.ReferenceImage, http, endpoint);
+        if (uploadedName is null)
+        {
+            Console.Error.WriteLine("  Failed to upload ControlNet reference image to ComfyUI.");
+            return false;
+        }
+
+        var (genW, genH, needsResize) = ResolveGenSize(p.Width, p.Height);
+
+        var workflow = new Dictionary<string, object>
+        {
+            ["1"]  = new { class_type = "CheckpointLoaderSimple", inputs = new { ckpt_name = p.Checkpoint } },
+            ["2"]  = new { class_type = "CLIPTextEncode",         inputs = new { text = p.Prompt,         clip = new object[] { "1", 1 } } },
+            ["3"]  = new { class_type = "CLIPTextEncode",         inputs = new { text = p.NegativePrompt, clip = new object[] { "1", 1 } } },
+            ["4"]  = new { class_type = "EmptyLatentImage",       inputs = new { width = genW, height = genH, batch_size = 1 } },
+            ["5"]  = new
+            {
+                class_type = "KSampler",
+                inputs     = new
+                {
+                    seed         = p.Seed,
+                    steps        = p.Steps,
+                    cfg          = p.Cfg,
+                    sampler_name = p.Sampler,
+                    scheduler    = p.Scheduler,
+                    denoise      = 1.0,
+                    model        = new object[] { "1",  0 },
+                    positive     = new object[] { "10", 0 }, // conditioning from ControlNetApplyAdvanced
+                    negative     = new object[] { "10", 1 },
+                    latent_image = new object[] { "4",  0 }
+                }
+            },
+            ["6"]  = new { class_type = "VAEDecode",              inputs = new { samples = new object[] { "5", 0 }, vae = new object[] { "1", 2 } } },
+            ["7"]  = new { class_type = "SaveImage",              inputs = new { filename_prefix = "vectrun", images = new object[] { "6", 0 } } },
+            ["8"]  = new { class_type = "LoadImage",              inputs = new { image = uploadedName } },
+            ["9"]  = new { class_type = "ControlNetLoader",       inputs = new { control_net_name = p.ControlNetModel } },
+            ["10"] = new
+            {
+                class_type = "ControlNetApplyAdvanced",
+                inputs     = new
+                {
+                    positive      = new object[] { "2", 0 },
+                    negative      = new object[] { "3", 0 },
+                    control_net   = new object[] { "9", 0 },
+                    image         = new object[] { "8", 0 },
+                    strength      = p.ControlNetStrength,
+                    start_percent = 0.0,
+                    end_percent   = 1.0
                 }
             }
         };

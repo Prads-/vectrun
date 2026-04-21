@@ -12,8 +12,13 @@ if (string.IsNullOrWhiteSpace(stdin))
     Console.Error.WriteLine("Usage: image-generator <file.json>");
     Console.Error.WriteLine("       echo '<json>' | image-generator");
     Console.Error.WriteLine("");
-    Console.Error.WriteLine("Single image:");
+    Console.Error.WriteLine("Single image (text-to-img):");
     Console.Error.WriteLine("  { \"prompt\": \"...\", \"outputPath\": \"...\", [negativePrompt, width, height, steps, cfg, seed, checkpoint, sampler, scheduler] }");
+    Console.Error.WriteLine("");
+    Console.Error.WriteLine("ControlNet (structure-preserving generation from a reference image):");
+    Console.Error.WriteLine("  { \"type\": \"controlnet\", \"prompt\": \"...\", \"outputPath\": \"...\", \"referenceImage\": \"path/to/structure.png\", [controlNetModel, controlNetStrength] }");
+    Console.Error.WriteLine("");
+    Console.Error.WriteLine("Img2Img / IPAdapter: same shape, type=\"img2img\" or \"ipadapter\", plus referenceImage.");
     Console.Error.WriteLine("");
     Console.Error.WriteLine("Bulk (sequential):");
     Console.Error.WriteLine("  { \"defaults\": { <common fields> }, \"images\": [ { \"prompt\": \"...\", \"outputPath\": \"...\" }, ... ] }");
@@ -71,24 +76,16 @@ try
 
             var p = MergeParams(defaults, item);
 
-            if (p.Type == "sprite_sheet" ? string.IsNullOrWhiteSpace(p.CharacterPrompt) : string.IsNullOrWhiteSpace(p.Prompt))
+            var err = ValidateParams(p);
+            if (err != null)
             {
-                var field = p.Type == "sprite_sheet" ? "characterPrompt" : "prompt";
-                Console.Error.WriteLine($"[{i + 1}/{items.Count}] Missing '{field}' — skipping.");
-                failed++;
-                continue;
-            }
-            if (string.IsNullOrWhiteSpace(p.OutputPath))
-            {
-                Console.Error.WriteLine($"[{i + 1}/{items.Count}] Missing 'outputPath' — skipping.");
+                Console.Error.WriteLine($"[{i + 1}/{items.Count}] Missing/invalid {err} — skipping.");
                 failed++;
                 continue;
             }
 
             Console.Error.WriteLine($"[{i + 1}/{items.Count}] Generating: {p.OutputPath}");
-            var ok2 = p.Type == "sprite_sheet"
-                ? await SpriteSheetGenerator.Generate(p, http, endpoint)
-                : await ComfyUiClient.GenerateTextToImg(p, http, endpoint);
+            var ok2 = await Dispatch(p, http, endpoint);
             if (!ok2) failed++;
         }
 
@@ -106,15 +103,10 @@ try
         // Single image mode (backward-compatible)
         var p = MergeParams(default, json);
 
-        if (p.Type == "sprite_sheet" ? string.IsNullOrWhiteSpace(p.CharacterPrompt) : string.IsNullOrWhiteSpace(p.Prompt))
-        { Console.Error.WriteLine($"Missing required field: '{(p.Type == "sprite_sheet" ? "characterPrompt" : "prompt")}'"); return 1; }
+        var err = ValidateParams(p);
+        if (err != null) { Console.Error.WriteLine($"Missing/invalid required field: {err}"); return 1; }
 
-        if (string.IsNullOrWhiteSpace(p.OutputPath))
-        { Console.Error.WriteLine("Missing required field: 'outputPath'"); return 1; }
-
-        var ok = p.Type == "sprite_sheet"
-            ? await SpriteSheetGenerator.Generate(p, http, endpoint)
-            : await ComfyUiClient.GenerateTextToImg(p, http, endpoint);
+        var ok = await Dispatch(p, http, endpoint);
         return ok ? 0 : 1;
     }
 }
@@ -164,13 +156,45 @@ static ImageParams MergeParams(JsonElement defaults, JsonElement item)
         FrameHeight:     Get("frameHeight",      128,                                       e => e.GetInt32()),
         Columns:         Get("columns",          6,                                         e => e.GetInt32()),
         Rows:            Get("rows",             5,                                         e => e.GetInt32()),
-        ImgToImgDenoise:  Get("imgToImgDenoise",  0.70,                                      e => e.GetDouble()),
-        IpAdapterWeight:  Get("ipAdapterWeight",  0.7,                                       e => e.GetDouble())
+        ImgToImgDenoise:    Get("imgToImgDenoise",    0.70,                    e => e.GetDouble()),
+        IpAdapterWeight:    Get("ipAdapterWeight",    0.7,                     e => e.GetDouble()),
+        ReferenceImage:     Get("referenceImage",     "",                      e => e.GetString() ?? ""),
+        ControlNetModel:    Get("controlNetModel",    DefaultControlNetModel(), e => e.GetString() ?? DefaultControlNetModel()),
+        ControlNetStrength: Get("controlNetStrength", 0.9,                     e => e.GetDouble())
     );
 }
 
-static string DefaultNegative()   => "blurry, low quality, distorted, watermark, text, signature, ugly, deformed";
-static string DefaultCheckpoint() => Environment.GetEnvironmentVariable("COMFYUI_CHECKPOINT") ?? "v1-5-pruned-emaonly.safetensors";
+static string DefaultNegative()       => "blurry, low quality, distorted, watermark, text, signature, ugly, deformed";
+static string DefaultCheckpoint()     => Environment.GetEnvironmentVariable("COMFYUI_CHECKPOINT")  ?? "v1-5-pruned-emaonly.safetensors";
+static string DefaultControlNetModel() => Environment.GetEnvironmentVariable("CONTROLNET_MODEL")   ?? "control-lora-canny-rank256.safetensors";
+
+// Returns a human-readable error describing the first missing/invalid required field, or null when valid.
+static string? ValidateParams(ImageParams p)
+{
+    if (p.Type == "sprite_sheet")
+    {
+        if (string.IsNullOrWhiteSpace(p.CharacterPrompt)) return "'characterPrompt'";
+    }
+    else if (string.IsNullOrWhiteSpace(p.Prompt)) return "'prompt'";
+
+    if (string.IsNullOrWhiteSpace(p.OutputPath)) return "'outputPath'";
+
+    if (p.Type is "controlnet" or "img2img" or "ipadapter")
+    {
+        if (string.IsNullOrWhiteSpace(p.ReferenceImage))     return "'referenceImage'";
+        if (!File.Exists(p.ReferenceImage))                  return $"'referenceImage' (file not found: {p.ReferenceImage})";
+    }
+    return null;
+}
+
+static Task<bool> Dispatch(ImageParams p, HttpClient http, string endpoint) => p.Type switch
+{
+    "sprite_sheet" => SpriteSheetGenerator.Generate   (p, http, endpoint),
+    "controlnet"   => ComfyUiClient.GenerateWithControlNet(p, http, endpoint),
+    "img2img"      => ComfyUiClient.GenerateImgToImg      (p, http, endpoint),
+    "ipadapter"    => ComfyUiClient.GenerateWithIPAdapter (p, http, endpoint),
+    _              => ComfyUiClient.GenerateTextToImg     (p, http, endpoint),
+};
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -196,5 +220,8 @@ record ImageParams(
     int                         Columns,
     int                         Rows,
     double                      ImgToImgDenoise,
-    double                      IpAdapterWeight
+    double                      IpAdapterWeight,
+    string                      ReferenceImage,
+    string                      ControlNetModel,
+    double                      ControlNetStrength
 );

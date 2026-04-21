@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Character Design Test — SVG</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    background: #07090d;
+    background-image:
+      radial-gradient(ellipse at 20% 10%, rgba(60,90,130,0.18), transparent 55%),
+      radial-gradient(ellipse at 80% 90%, rgba(130,40,70,0.14), transparent 55%);
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    color: #5a6778;
+    padding: 56px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 40px;
+  }
+  header {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  h1 {
+    font-size: 11px;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    color: #3a4555;
+    font-weight: 400;
+  }
+  header p {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: #2a3340;
+  }
+  .roster {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .card {
+    width: 200px;
+    background: #0d1119;
+    border: 1px solid #1a1f2a;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .stage {
+    height: 220px;
+    background:
+      linear-gradient(180deg, rgba(70,95,140,0.12) 0%, transparent 40%),
+      linear-gradient(0deg, #1a0f06 0%, #0a0d15 40%, #14192a 100%);
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .stage::before {
+    content: '';
+    position: absolute;
+    top: 24px; right: 24px;
+    width: 32px; height: 32px;
+    background: radial-gradient(circle, #e8eef8 10%, rgba(232,238,248,0.25) 40%, transparent 65%);
+    border-radius: 50%;
+    opacity: 0.7;
+  }
+  .stage::after {
+    content: '';
+    position: absolute;
+    bottom: 10px;
+    width: 75%;
+    height: 10px;
+    background: radial-gradient(ellipse, rgba(0,0,0,0.7), transparent 70%);
+  }
+  .caption {
+    padding: 10px 14px;
+    font-size: 9px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: #4a5566;
+    border-top: 1px solid #1a1f2a;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .caption b { color: #b8906a; font-weight: 500; letter-spacing: 3px; }
+  .caption .role { color: #3a4555; }
+
+  svg { position: relative; z-index: 1; margin-bottom: 20px; overflow: visible; }
+
+  /* animations */
+  @keyframes breathe {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-2px); }
+  }
+  @keyframes sway {
+    0%, 100% { transform: rotate(-0.8deg); }
+    50% { transform: rotate(0.8deg); }
+  }
+  @keyframes eye-glow {
+    0%, 100% { opacity: 1; filter: drop-shadow(0 0 3px #00e5ff); }
+    50% { opacity: 0.75; filter: drop-shadow(0 0 6px #00e5ff); }
+  }
+  @keyframes lunge {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(2px); }
+  }
+  @keyframes dagger-vibrate {
+    0%, 100% { transform: rotate(0deg); }
+    50% { transform: rotate(1.5deg); }
+  }
+  @keyframes slime-pulse {
+    0%, 100% { transform: scaleY(1) scaleX(1) translateY(0); }
+    50% { transform: scaleY(0.88) scaleX(1.1) translateY(2px); }
+  }
+  @keyframes crack-glow {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+  }
+  @keyframes blink {
+    0%, 92%, 100% { transform: scaleY(1); }
+    95% { transform: scaleY(0.1); }
+  }
+
+  .rogue-idle { animation: breathe 3.2s ease-in-out infinite; transform-origin: 50% 100%; }
+  .rogue-cloak-sway { animation: sway 5s ease-in-out infinite; transform-origin: 50% 12%; }
+  .rogue-lunge { animation: lunge 1.4s ease-in-out infinite; }
+  .eye { animation: eye-glow 2.4s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+  .dagger-held { animation: dagger-vibrate 0.4s ease-in-out infinite; transform-origin: center bottom; transform-box: fill-box; }
+  .slime-body { animation: slime-pulse 2.2s ease-in-out infinite; transform-origin: 50% 100%; }
+  .slime-crack { animation: crack-glow 1.8s ease-in-out infinite; }
+  .slime-eyes { animation: blink 5s ease-in-out infinite; transform-origin: center; transform-box: fill-box; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Character Design Test</h1>
+    <p>svg · css animation</p>
+  </header>
+
+  <div class="roster">
+
+    <!-- =================== ROGUE · IDLE =================== -->
+    <div class="card">
+      <div class="stage">
+        <svg viewBox="0 0 100 160" width="110" height="176">
+          <defs>
+            <linearGradient id="cloakGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#3d4a5c"/>
+              <stop offset="55%" stop-color="#252d3a"/>
+              <stop offset="100%" stop-color="#12161f"/>
+            </linearGradient>
+            <linearGradient id="scarfGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#9c3b2e"/>
+              <stop offset="100%" stop-color="#6b2419"/>
+            </linearGradient>
+            <radialGradient id="eyeGlow" cx="0.5" cy="0.5" r="0.5">
+              <stop offset="0%" stop-color="#a8f8ff"/>
+              <stop offset="30%" stop-color="#00e5ff"/>
+              <stop offset="100%" stop-color="rgba(0,229,255,0)"/>
+            </radialGradient>
+          </defs>
+
+          <g class="rogue-idle">
+            <!-- Boots poking below cloak -->
+            <ellipse cx="40" cy="150" rx="7" ry="2.5" fill="#08090d"/>
+            <ellipse cx="60" cy="150" rx="7" ry="2.5" fill="#08090d"/>
+            <path d="M 33,147 Q 36,143 47,144 L 47,150 L 33,150 Z" fill="#18120a"/>
+            <path d="M 53,144 Q 64,143 67,147 L 67,150 L 53,150 Z" fill="#18120a"/>
+
+            <g class="rogue-cloak-sway">
+              <!-- Cloak main silhouette, asymmetric -->
+              <path d="
+                M 50,6
+                C 28,8 20,26 26,44
+                L 22,88
+                L 10,148
+                L 34,150
+                L 50,146
+                L 66,150
+                L 90,148
+                L 78,88
+                L 74,44
+                C 80,26 72,8 50,6 Z"
+                fill="url(#cloakGrad)" stroke="#07090d" stroke-width="1.2"/>
+
+              <!-- Cloak inner shadow fold -->
+              <path d="M 28,50 L 30,120 L 20,140 L 18,90 Z" fill="#0e1219" opacity="0.6"/>
+              <path d="M 72,50 L 70,120 L 80,140 L 82,90 Z" fill="#0e1219" opacity="0.6"/>
+
+              <!-- Hood opening (face cavity) -->
+              <ellipse cx="50" cy="38" rx="13" ry="11" fill="#050608"/>
+
+              <!-- Hood inner rim highlight -->
+              <path d="M 36,40 Q 50,26 64,40" fill="none" stroke="#4a5869" stroke-width="1.4" stroke-linecap="round"/>
+
+              <!-- Jawline hint (pale skin) -->
+              <path d="M 44,44 Q 50,48 56,44 L 56,47 Q 50,50 44,47 Z" fill="#9c7554" opacity="0.4"/>
+
+              <!-- Glowing eye -->
+              <g class="eye">
+                <ellipse cx="45" cy="37" rx="4" ry="2" fill="url(#eyeGlow)" opacity="0.7"/>
+                <ellipse cx="45" cy="37" rx="1.6" ry="1.1" fill="#e8ffff"/>
+              </g>
+
+              <!-- Scar line below hood (across cheek) -->
+              <path d="M 54,42 L 58,48" stroke="#3a2018" stroke-width="0.8" opacity="0.7"/>
+
+              <!-- Scarf/sash across shoulders, rust red -->
+              <path d="M 30,52 Q 50,60 70,52 L 68,60 Q 50,66 32,60 Z" fill="url(#scarfGrad)"/>
+              <path d="M 64,60 L 74,88 L 69,90 L 60,63 Z" fill="#6b2419"/>
+              <path d="M 64,60 L 72,86 L 68,88 L 62,62 Z" fill="#451612"/>
+
+              <!-- Belt -->
+              <rect x="24" y="100" width="52" height="5" fill="#1a0f06"/>
+              <rect x="24" y="99" width="52" height="1.5" fill="#2a1a0a"/>
+              <rect x="46" y="98" width="8" height="8" fill="#a07a3a" stroke="#3d2817" stroke-width="0.5"/>
+              <circle cx="50" cy="102" r="1.4" fill="#3d2817"/>
+
+              <!-- Belt pouches -->
+              <path d="M 30,104 Q 30,112 34,113 L 38,113 Q 42,112 42,104 Z" fill="#2a1a0a" stroke="#0a0605" stroke-width="0.5"/>
+              <rect x="62" y="104" width="8" height="9" rx="1" fill="#2a1a0a" stroke="#0a0605" stroke-width="0.5"/>
+
+              <!-- Dagger sheathed at hip -->
+              <g transform="translate(78, 108) rotate(15)">
+                <rect x="-1.2" y="0" width="2.4" height="14" fill="#2a1a0a"/>
+                <rect x="-2" y="14" width="4" height="2" fill="#6b4a22"/>
+                <rect x="-1" y="16" width="2" height="4" fill="#1a0d05"/>
+              </g>
+            </g>
+          </g>
+        </svg>
+      </div>
+      <div class="caption"><span>001</span><b>Kael</b><span class="role">Idle</span></div>
+    </div>
+
+    <!-- =================== ROGUE · ATTACK =================== -->
+    <div class="card">
+      <div class="stage">
+        <svg viewBox="0 0 100 160" width="110" height="176">
+          <g class="rogue-lunge">
+            <!-- Boots in forward stance -->
+            <path d="M 28,148 Q 32,140 44,144 L 46,150 L 28,150 Z" fill="#18120a"/>
+            <ellipse cx="36" cy="150" rx="9" ry="2" fill="#08090d"/>
+            <path d="M 58,146 Q 70,142 74,148 L 74,150 L 58,150 Z" fill="#18120a"/>
+            <ellipse cx="66" cy="150" rx="8" ry="2" fill="#08090d"/>
+
+            <!-- Cloak flared back (trailing left as character lunges right) -->
+            <path d="
+              M 50,10
+              C 30,12 22,30 28,46
+              L 30,78
+              L 6,140
+              L 14,148
+              L 42,148
+              L 58,144
+              L 78,148
+              L 76,90
+              L 76,44
+              C 80,28 70,10 50,10 Z"
+              fill="url(#cloakGrad)" stroke="#07090d" stroke-width="1.2"/>
+
+            <!-- Trailing cloak edge (separate streaming piece) -->
+            <path d="M 18,70 L 2,110 L 0,128 L 12,100 L 26,78 Z"
+              fill="#1a1f2a" opacity="0.9"/>
+
+            <!-- Hood opening -->
+            <ellipse cx="52" cy="40" rx="13" ry="11" fill="#050608"/>
+            <path d="M 38,42 Q 52,28 66,42" fill="none" stroke="#4a5869" stroke-width="1.4" stroke-linecap="round"/>
+            <path d="M 46,46 Q 52,50 58,46 L 58,49 Q 52,52 46,49 Z" fill="#9c7554" opacity="0.4"/>
+
+            <!-- Same glowing eye (consistency) -->
+            <g class="eye">
+              <ellipse cx="47" cy="39" rx="4" ry="2" fill="url(#eyeGlow)" opacity="0.85"/>
+              <ellipse cx="47" cy="39" rx="1.6" ry="1.1" fill="#e8ffff"/>
+            </g>
+            <path d="M 56,44 L 60,50" stroke="#3a2018" stroke-width="0.8" opacity="0.7"/>
+
+            <!-- Scarf whipping back -->
+            <path d="M 32,54 Q 52,62 72,54 L 70,62 Q 52,68 34,62 Z" fill="url(#scarfGrad)"/>
+            <path d="M 32,58 L 8,78 L 4,88 L 14,78 L 34,64 Z" fill="#6b2419"/>
+            <path d="M 30,58 L 6,76 L 2,84 L 10,78 L 32,62 Z" fill="#451612" opacity="0.8"/>
+
+            <!-- Extended attack arm with dagger -->
+            <g>
+              <!-- shoulder to wrist -->
+              <path d="M 66,66 Q 82,58 96,48 L 98,52 Q 84,64 68,72 Z" fill="#2a3340" stroke="#07090d" stroke-width="0.8"/>
+              <!-- glove/wrist -->
+              <rect x="92" y="46" width="8" height="7" rx="1" fill="#1a1f28" transform="rotate(-28 96 49)"/>
+              <!-- dagger -->
+              <g class="dagger-held" transform="translate(96, 48) rotate(-30)">
+                <path d="M 0,0 L 1,-24 L 3,-24 L 4,0 Z" fill="#d4d9e0"/>
+                <path d="M 1,-24 L 2,-26 L 3,-24 Z" fill="#9aa3b0"/>
+                <rect x="-3" y="-2" width="10" height="2.5" fill="#3d2817"/>
+                <rect x="-1" y="0.5" width="6" height="6" rx="1" fill="#1a0d05"/>
+                <!-- motion blur line -->
+                <path d="M 2,-22 L 2,-32" stroke="#00e5ff" stroke-width="0.6" opacity="0.5"/>
+              </g>
+            </g>
+
+            <!-- Belt -->
+            <rect x="26" y="102" width="48" height="5" fill="#1a0f06"/>
+            <rect x="46" y="100" width="8" height="8" fill="#a07a3a" stroke="#3d2817" stroke-width="0.5"/>
+          </g>
+        </svg>
+      </div>
+      <div class="caption"><span>001</span><b>Kael</b><span class="role">Strike</span></div>
+    </div>
+
+    <!-- =================== ENEMY · BLIGHT SLIME =================== -->
+    <div class="card">
+      <div class="stage">
+        <svg viewBox="0 0 100 100" width="150" height="150" style="margin-bottom:12px">
+          <defs>
+            <radialGradient id="slimeGrad" cx="0.4" cy="0.3" r="0.8">
+              <stop offset="0%" stop-color="#8a3d9e"/>
+              <stop offset="50%" stop-color="#4a1a5e"/>
+              <stop offset="100%" stop-color="#1f0a2e"/>
+            </radialGradient>
+            <radialGradient id="slimeHighlight" cx="0.3" cy="0.25" r="0.3">
+              <stop offset="0%" stop-color="rgba(220,140,255,0.7)"/>
+              <stop offset="100%" stop-color="rgba(220,140,255,0)"/>
+            </radialGradient>
+            <filter id="crackGlow">
+              <feGaussianBlur stdDeviation="0.6"/>
+            </filter>
+          </defs>
+
+          <!-- drips below -->
+          <ellipse cx="28" cy="93" rx="3" ry="2" fill="#2e1040" opacity="0.6"/>
+          <ellipse cx="74" cy="94" rx="2.5" ry="1.5" fill="#2e1040" opacity="0.5"/>
+
+          <g class="slime-body">
+            <!-- main blob -->
+            <path d="
+              M 12,82
+              C 6,60 14,36 32,28
+              C 48,22 62,24 74,32
+              C 90,42 92,70 86,84
+              C 80,92 60,90 50,88
+              C 34,90 18,92 12,82 Z"
+              fill="url(#slimeGrad)" stroke="#0a0410" stroke-width="1.2"/>
+
+            <!-- surface highlight -->
+            <ellipse cx="38" cy="44" rx="14" ry="10" fill="url(#slimeHighlight)"/>
+
+            <!-- glowing cracks -->
+            <g class="slime-crack" filter="url(#crackGlow)">
+              <path d="M 22,60 L 30,55 L 28,66 L 36,62" fill="none" stroke="#ff3ea8" stroke-width="1.2" stroke-linecap="round"/>
+              <path d="M 70,50 L 76,58 L 72,66" fill="none" stroke="#ff3ea8" stroke-width="1.2" stroke-linecap="round"/>
+              <path d="M 50,78 L 56,72" fill="none" stroke="#ff3ea8" stroke-width="1" stroke-linecap="round"/>
+            </g>
+
+            <!-- embedded crystal shards -->
+            <path d="M 22,40 L 26,30 L 30,42 L 26,46 Z" fill="#d8a8ff" stroke="#3a0f5a" stroke-width="0.7"/>
+            <path d="M 26,30 L 28,33 L 26,46" stroke="#f0d8ff" stroke-width="0.5" fill="none"/>
+            <path d="M 78,52 L 82,46 L 86,54 L 82,58 Z" fill="#d8a8ff" stroke="#3a0f5a" stroke-width="0.7"/>
+
+            <!-- eyes -->
+            <g class="slime-eyes">
+              <ellipse cx="40" cy="56" rx="4" ry="5" fill="#0a0410"/>
+              <ellipse cx="60" cy="56" rx="4" ry="5" fill="#0a0410"/>
+              <circle cx="41" cy="55" r="1.3" fill="#ff6fd0"/>
+              <circle cx="61" cy="55" r="1.3" fill="#ff6fd0"/>
+              <circle cx="41.5" cy="54.5" r="0.5" fill="#ffffff"/>
+              <circle cx="61.5" cy="54.5" r="0.5" fill="#ffffff"/>
+            </g>
+
+            <!-- jagged mouth -->
+            <path d="M 36,72 L 40,78 L 44,72 L 48,78 L 52,72 L 56,78 L 60,72 L 64,78 L 60,74 L 40,74 Z"
+              fill="#0a0410" stroke="#2e1040" stroke-width="0.5"/>
+            <!-- teeth -->
+            <path d="M 40,72 L 42,76 L 44,72 Z" fill="#e8d8ff"/>
+            <path d="M 48,72 L 50,77 L 52,72 Z" fill="#e8d8ff"/>
+            <path d="M 56,72 L 58,76 L 60,72 Z" fill="#e8d8ff"/>
+
+            <!-- drool -->
+            <path d="M 49,78 Q 50,84 51,82 Q 52,80 50,78 Z" fill="#d8a8ff" opacity="0.8"/>
+          </g>
+        </svg>
+      </div>
+      <div class="caption"><span>002</span><b>Blight</b><span class="role">Enemy</span></div>
+    </div>
+
+  </div>
+</body>
+</html>

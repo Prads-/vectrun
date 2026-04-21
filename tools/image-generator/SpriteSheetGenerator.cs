@@ -72,12 +72,13 @@ internal static class SpriteSheetGenerator
 
                 var frameParams = p with
                 {
-                    Prompt     = $"{p.CharacterPrompt}, {cell.Prompt}",
-                    OutputPath = framePath,
-                    Seed       = p.Seed + frames.Count  // vary seed per cell for pose diversity
+                    Prompt         = $"{p.CharacterPrompt}, {cell.Prompt}",
+                    OutputPath     = framePath,
+                    Seed           = p.Seed + frames.Count,  // vary seed per cell for pose diversity
+                    ReferenceImage = canonicalPath
                 };
 
-                if (!await ComfyUiClient.GenerateWithIPAdapter(frameParams, canonicalPath, http, endpoint))
+                if (!await ComfyUiClient.GenerateWithIPAdapter(frameParams, http, endpoint))
                     return false;
 
                 frames.Add((cell.Row, cell.Col, framePath));

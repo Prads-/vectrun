@@ -13,6 +13,7 @@ dotnet build tools/scaffold-claude/scaffold-claude.csproj  -c Release
 dotnet build tools/file-manager/file-manager.csproj        -c Release
 dotnet build tools/image-generator/image-generator.csproj  -c Release
 dotnet build tools/ollama-stop/ollama-stop.csproj          -c Release
+dotnet build tools/svg-rasterize/svg-rasterize.csproj      -c Release
 ```
 
 Binaries are written to each tool's `bin/Release/net9.0/` directory.
@@ -195,6 +196,7 @@ Or via stdin (pipe a JSON file in).
 | `COMFYUI_CHECKPOINT` | `v1-5-pruned-emaonly.safetensors`              | Default checkpoint filename                           |
 | `IPADAPTER_MODEL`    | `ip-adapter_sdxl.bin`                         | IPAdapter model filename (sprite sheets only)         |
 | `CLIP_VISION_MODEL`  | `CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors` | CLIP Vision model filename (sprite sheets only)       |
+| `CONTROLNET_MODEL`   | `control-lora-canny-rank256.safetensors`      | ControlNet model filename (used by `type: "controlnet"`) |
 
 ### Single image (stdin JSON)
 
@@ -313,6 +315,37 @@ Each `animations` entry is exactly one cell at `(row, col)` with a specific pose
 | `rows`            | `5`     | Number of rows in the grid                                               |
 | `ipAdapterWeight` | `0.7`   | IPAdapter influence strength (0.0–1.0)                                   |
 
+### ControlNet (structure-preserving generation)
+
+Locks the generated image's composition (silhouette, pose, proportions) to the edges of a reference image, while letting SD render fully-detailed art on top. Typical use: rasterize a hand-authored SVG character pose and feed it here so SD renders a detailed sprite that matches the exact pose and layout.
+
+**Requires:** a ControlNet model in `models/controlnet/` matching `CONTROLNET_MODEL`. Common choices:
+- `control-lora-canny-rank256.safetensors` — hard edges (default)
+- Lineart / Scribble variants — smoother, better for organic / hand-drawn inputs
+
+```json
+{
+  "type": "controlnet",
+  "prompt": "armored skeleton warrior, dark fantasy, painterly game sprite, 4k",
+  "outputPath": "assets/enemies/skeleton.png",
+  "referenceImage": "tmp/skeleton-pose.png",
+  "controlNetStrength": 0.9,
+  "width": 768,
+  "height": 768
+}
+```
+
+**ControlNet fields:**
+
+| Field                | Required | Default                | Description                                                                 |
+|----------------------|----------|------------------------|-----------------------------------------------------------------------------|
+| `type`               | Yes      | —                      | Must be `"controlnet"`.                                                     |
+| `referenceImage`     | Yes      | —                      | Path to the structure reference (e.g. SVG rasterized to PNG).               |
+| `controlNetModel`    | No       | `CONTROLNET_MODEL` env | ControlNet model filename in `models/controlnet/`.                          |
+| `controlNetStrength` | No       | `0.9`                  | How strictly composition follows the reference (0.0 ignored – 1.0 strict). |
+
+The same `referenceImage` field also drives `type: "img2img"` and `type: "ipadapter"` modes — ControlNet preserves structure, img2img rewrites the image at a chosen denoise strength, IPAdapter transfers style/subject.
+
 ### Recommended dimensions by asset type
 
 | Asset type              | Width | Height | Notes                              |
@@ -362,3 +395,73 @@ ollama-stop <model>
 ### Output
 
 `OK` on success (or ollama's own output if non-empty). stderr + non-zero exit on failure.
+
+---
+
+## svg-rasterize
+
+Converts SVG into PNG using SkiaSharp via [`Svg.Skia`](https://github.com/wieslawsoltes/Svg.Skia). Preserves aspect ratio by default (fit-within, centered, transparent padding). Used as the bridge step between a Claude-authored SVG pose and `image-generator`'s ControlNet input.
+
+### CLI
+
+```bash
+svg-rasterize <file.json>
+```
+
+Or via stdin (pipe a JSON file in).
+
+### Single (stdin JSON)
+
+Either `svg` (inline) or `svgPath` (file) is required — not both:
+
+```json
+{
+  "svgPath": "tmp/skeleton-pose.svg",
+  "outputPath": "tmp/skeleton-pose.png",
+  "width": 768,
+  "height": 768
+}
+```
+
+```json
+{
+  "svg": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='#ff3366'/></svg>",
+  "outputPath": "tmp/dot.png",
+  "width": 256,
+  "height": 256,
+  "background": "#101018"
+}
+```
+
+### Bulk (stdin JSON)
+
+```json
+{
+  "defaults": { "width": 768, "height": 768 },
+  "images": [
+    { "svgPath": "poses/idle.svg",   "outputPath": "rast/idle.png"   },
+    { "svgPath": "poses/strike.svg", "outputPath": "rast/strike.png" }
+  ]
+}
+```
+
+### Fields
+
+| Field        | Required | Default       | Description                                                                                 |
+|--------------|----------|---------------|---------------------------------------------------------------------------------------------|
+| `svg`        | One of   | —             | Inline SVG markup as a string.                                                              |
+| `svgPath`    | One of   | —             | Path to an SVG file on disk.                                                                |
+| `outputPath` | Yes      | —             | Absolute path where the PNG will be saved.                                                  |
+| `width`      | No       | intrinsic     | Output width in px. If only one dim is given, the other is derived from the SVG's aspect.  |
+| `height`     | No       | intrinsic     | Output height in px.                                                                        |
+| `background` | No       | `transparent` | Any SkiaSharp-parseable color (`"#ffffff"`, `"#101018"`, `"red"`, etc.).                   |
+
+### Sizing behaviour
+
+- **Both `width` and `height` given** → output is exactly that size. SVG is scaled to fit within while preserving aspect ratio and centered; any remaining area is transparent (or `background` if set). This is the shape ControlNet expects.
+- **Only one given** → the other is derived from the SVG's intrinsic aspect ratio.
+- **Neither given** → the SVG's intrinsic bounds are used.
+
+### Output
+
+`OK: <outputPath> (<bytes> bytes, <w>x<h>)` per rasterized image. Bulk mode additionally prints `OK: N file(s) rasterized.` at the end.
