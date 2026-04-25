@@ -43,10 +43,22 @@ internal static class Presets
     };
 
     // ── Recipe 1: character sprite sheet (pixel) ──────────────────────────────
-    private static Task<bool> CharacterPixel(ImageParams u, HttpClient http, string endpoint) =>
-        ComfyUiClient.GenerateTextToImg(BuildCharacterPixel(u, u.OutputPath), http, endpoint);
+    // Final output gets alpha-from-white so the developer can drop sheets straight
+    // into a Canvas / Phaser texture without a runtime color-key step. Do NOT trim
+    // background — the 4×4 grid layout must be preserved in pixel coordinates.
+    private static Task<bool> CharacterPixel(ImageParams u, HttpClient http, string endpoint)
+    {
+        var p = BuildCharacterPixel(u, u.OutputPath) with
+        {
+            AlphaFromWhite = true,
+            AlphaThreshold = 40,
+        };
+        return ComfyUiClient.GenerateTextToImg(p, http, endpoint);
+    }
 
     // ── Recipe 1 → Recipe 4: character sprite sheet (cartoon, two-pass) ───────
+    // Pass 1 stays opaque (it's an intermediate that pass 2 reads as input).
+    // Pass 2 is the FINAL output, so alpha-from-white is applied there.
     private static async Task<bool> CharacterCartoon(ImageParams u, HttpClient http, string endpoint)
     {
         var temp = IntermediatePath(u.OutputPath);
@@ -57,7 +69,11 @@ internal static class Presets
             u, temp,
             scaffoldPrompt: "cartoon, cartoon style, flat colors, bold outlines, 2d, sprite sheet, multiple views, chibi, from side, looking away, from behind, back",
             scaffoldSuffix: "white background",
-            defaultNegative: "pixel art, pixelated, painterly, oil painting, realistic, photorealistic, blurry, text, logo, watermark, frame, border, ui");
+            defaultNegative: "pixel art, pixelated, painterly, oil painting, realistic, photorealistic, blurry, text, logo, watermark, ui, (picture frame:1.4), (image border:1.4), (matte border:1.3), framed image, frame around image, decorative border, outlined edges, panel border, sprite sheet border") with
+        {
+            AlphaFromWhite = true,
+            AlphaThreshold = 40,
+        };
 
         var ok = await ComfyUiClient.GenerateImgToImg(pass2, http, endpoint);
         TryDelete(temp);
@@ -117,7 +133,7 @@ internal static class Presets
     private static ImageParams BuildCharacterPixel(ImageParams u, string outputPath) => u with
     {
         Prompt             = Wrap("pixel_character_sprite, pxlchrctrsprt, sprite, sprite sheet, sprite art, pixel, (pixel art:1.5), retro game, vibrant colors, pixelated, multiple views, concept art, (chibi:1.5), from side, looking away, from behind, back", u.Prompt, "white background"),
-        NegativePrompt     = AppendUserNeg("", u.NegativePrompt),
+        NegativePrompt     = AppendUserNeg("(picture frame:1.4), (image border:1.4), (matte border:1.3), framed image, frame around image, decorative border, outlined edges, panel border, sprite sheet border", u.NegativePrompt),
         OutputPath         = outputPath,
         Checkpoint         = "prefect_illustrious_xl_v3.fp16.safetensors",
         Lora               = "pixel_character_sprite_illustrious.safetensors",

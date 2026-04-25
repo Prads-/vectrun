@@ -7,7 +7,7 @@ var stdin = await Console.In.ReadToEndAsync();
 if (string.IsNullOrWhiteSpace(stdin))
 {
     Console.Error.WriteLine("Usage: echo '<json>' | file-manager");
-    Console.Error.WriteLine("Operations: create_directory, write_text, write_binary, read_text, list_directory");
+    Console.Error.WriteLine("Operations: create_directory, write_text, write_binary, read_text, list_directory, exists");
     return 1;
 }
 
@@ -44,6 +44,7 @@ return operation switch
     "write_binary"     => WriteBinary(path, json),
     "read_text"        => ReadText(path),
     "list_directory"   => ListDirectory(path),
+    "exists"           => Exists(path),
     _                  => UnknownOperation(operation)
 };
 
@@ -158,9 +159,18 @@ static int ListDirectory(string path)
     }
 }
 
+// Exit code 0 either way — non-existence is a valid answer, not an error.
+// stdout is "yes" or "no" so callers (e.g. Lua scripts) can compare directly.
+static int Exists(string path)
+{
+    var exists = File.Exists(path) || Directory.Exists(path);
+    Console.WriteLine(exists ? "yes" : "no");
+    return 0;
+}
+
 static int UnknownOperation(string operation)
 {
-    Console.Error.WriteLine($"Unknown operation '{operation}'. Valid: create_directory, write_text, write_binary, read_text, list_directory");
+    Console.Error.WriteLine($"Unknown operation '{operation}'. Valid: create_directory, write_text, write_binary, read_text, list_directory, exists");
     return 1;
 }
 

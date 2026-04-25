@@ -50,8 +50,10 @@ try
 
         if (items.Count == 0)
         {
-            Console.Error.WriteLine("'images' array is empty.");
-            return 1;
+            // Empty bulk request is a valid "nothing to do" — used by the verify_assets
+            // regen path when every expected asset is already on disk.
+            Console.WriteLine("OK: 0 image(s) generated (empty request).");
+            return 0;
         }
 
         var failed = 0;

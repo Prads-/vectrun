@@ -68,27 +68,39 @@ await Console.Error.WriteLineAsync($"Scaffolded project at: {projectDir}");
 // ── Launch Claude Code ────────────────────────────────────────────────────────
 
 const string prompt =
-    "Read CLAUDE.md for the complete project requirements. " +
+    "First, orient yourself: run `ls -la` and `ls -R docs assets` to see the project structure and what design docs, manifests, and assets are already on disk. " +
+    "Then read CLAUDE.md for the complete project requirements. " +
     "Then create a comprehensive TODO.md file in the project directory listing every task required to implement the project — " +
     "cover project setup, all features, all files to create, configuration, and anything else needed for a complete, runnable result. " +
+    "Your TODO.md MUST include the Quality Control sub-agent pass described under '## Quality control' in CLAUDE.md as the final required step — it is not optional. " +
     "Once the TODO.md is written, work through every item in it one by one, checking each off as you complete it. " +
-    "Do not stop until every item is checked off. " +
-    "When all items are done, print a short summary of what was built and where the entry point is.";
+    "Do not stop until every item is checked off, including the QC pass. " +
+    "When all items are done (QC clean), print a short summary of what was built and where the entry point is.";
 
 // Spawn Claude in a NEW visible console window so the user can watch its work live.
 // scaffold-claude itself runs inside vectrun's pipeline with stdin/stdout piped, so it
 // has no attached terminal. We use cmd.exe with UseShellExecute=true, which triggers
 // ShellExecuteEx and allocates a fresh console for the child process.
 //
-// The inner command is `claude <args> & pause`. The `& pause` keeps the window open
-// after Claude exits so the user can read the final output before closing it. When
-// the user presses a key, cmd exits, WaitForExit returns here, and the pipeline
-// continues with Claude's exit code propagated back.
+// We launch Claude in interactive mode (no -p): this shows the full TUI so the user
+// can watch tool calls / file edits live, AND gives Claude the auto-orientation
+// context (cwd, env, gitStatus, CLAUDE.md auto-load) that print mode strips down.
+// The positional prompt arg becomes the first user message; --dangerously-skip-permissions
+// keeps it autonomous. The cmd window stays open until the user /exits Claude, then
+// `& pause` holds the window so they can read the final summary before closing.
+//
+// Quoting note: do NOT use `\"` to wrap the prompt — cmd does not understand `\"`
+// as an escape, so the prompt would split at every space ("unknown option '-la`'"
+// regression). Wrap the prompt with bare `"…"` instead. Cmd's `/C` rule with `&`
+// in the inner command falls through to "strip first and last quote, run the
+// rest", which leaves the inner `"prompt with spaces"` intact as one cmd arg.
+// This breaks if the prompt itself contains a literal `"` — the EscapeForCmdDoubleQuoted
+// pass would need to be replaced; today the prompt is a fixed string with none.
 var safePrompt = EscapeForCmdDoubleQuoted(prompt);
 var modelFlag  = string.IsNullOrWhiteSpace(model)
     ? ""
-    : $"--model \\\"{EscapeForCmdDoubleQuoted(model!)}\\\" ";
-var cmdArgs    = $"/C \"claude {modelFlag}--dangerously-skip-permissions -p \\\"{safePrompt}\\\" & pause\"";
+    : $"--model \"{EscapeForCmdDoubleQuoted(model!)}\" ";
+var cmdArgs    = $"/C \"claude {modelFlag}--dangerously-skip-permissions \"{safePrompt}\" & pause\"";
 
 await Console.Error.WriteLineAsync(
     string.IsNullOrWhiteSpace(model)
