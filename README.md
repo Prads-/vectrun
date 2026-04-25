@@ -152,7 +152,7 @@ Both `pathType` options are configurable in the web editor's **Tools** panel, wh
 |---|---|
 | **agent** | Sends a request to an AI model. Runs a tool-calling loop until the model stops calling tools. |
 | **branch** | Compares input to `expectedOutput` (optional). Routes to `trueNodeIds` on match, `falseNodeIds` on mismatch. If `expectedOutput` is omitted, always routes to `trueNodeIds`. |
-| **logic** | Runs an external process (`logicType: "process"`) or an embedded Lua script (`logicType: "script"`). For processes: input via stdin, output from stdout; fails on non-zero exit or anything written to stderr. Set `processPathType` to `"relative"` (default, resolved relative to the pipeline folder) or `"absolute"`. For scripts: input is exposed as the Lua global `input`; every tool in `tools.json` is exposed as a Lua global function; the script's return value becomes the node output. |
+| **logic** | Runs an external process (`logicType: "process"`) or an embedded Lua script (`logicType: "script"`). For processes: input is passed via stdin, output is read from stdout, and the node fails on non-zero exit; stderr is included in the failure message when the process fails. Set `processPathType` to `"relative"` (default, resolved relative to the pipeline folder) or `"absolute"`. For scripts: input is exposed as the Lua global `input`; every tool in `tools.json` is exposed as a Lua function; the script's return value becomes the node output. |
 | **wait** | Sleeps for `durationMs` milliseconds, then passes input through unchanged. |
 
 ### Logic node — `processInput` and `{PREVIOUS_AGENT_OUTPUT}`
@@ -322,21 +322,36 @@ When called via stdin JSON, `append` accepts an optional `"separator"` field (de
 
 ### scaffold-claude
 
-Reads project requirements from stdin, scaffolds a `CLAUDE.md` in a new project directory, then launches Claude Code non-interactively to build the project. Claude's output is streamed to stdout so it flows through the pipeline.
+Reads project requirements from stdin, scaffolds a `CLAUDE.md` in a new project directory, then launches Claude Code in a new visible console window so the user can watch the build. The pipeline waits for that console process to exit. The console stays open after Claude finishes until a key is pressed, then `scaffold-claude` writes a final `Project directory: <path>` line to stdout.
 
 ```
 scaffold-claude <project-directory>
 ```
 
-The requirements text is read from stdin (piped from a previous node). Claude Code must be installed and available in `PATH`. The project directory is created if it does not exist.
+The requirements text is read from stdin (piped from a previous node). Claude Code must be installed and available in `PATH`. The project directory is created if it does not exist. In JSON pipeline mode, pass `projectDirectory`, `requirements`, and optional `model`.
 
-**Example pipeline use:** an agent node summarises or refines raw requirements → `scaffold-claude` scaffolds and builds the project → a downstream node reads the build summary.
+**Example pipeline use:** an agent prepares requirements → `scaffold-claude` writes `CLAUDE.md` and opens Claude Code in a visible terminal → the pipeline receives the final project directory line after the terminal exits.
 
 ### image-generator
 
-Generates an image (or a batch of images) via a local [ComfyUI](https://github.com/comfyanonymous/ComfyUI) instance and saves each to disk. Input is a JSON object read from stdin.
+Generates an image, sprite sheet, composite sheet, or batch of images via a local [ComfyUI](https://github.com/comfyanonymous/ComfyUI) instance and saves each to disk. Input is a JSON object read from stdin.
 
-ComfyUI must be running at `http://localhost:8188` (override with `COMFYUI_ENDPOINT`). No special extensions required — only built-in nodes are used. After generation the tool calls `POST /free` to release VRAM (best-effort).
+ComfyUI must be running at `http://localhost:8188` (override with `COMFYUI_ENDPOINT`). Queued prompts time out after 10 minutes. After generation the tool calls `POST /free` to release VRAM (best-effort).
+
+Some workflows need ComfyUI assets beyond the base install. Upscaling (`upscaleBy > 0`, including several presets) uses the `UltimateSDUpscale` custom node and an upscaler such as `RealESRGAN_x4plus.pth`. ControlNet and sprite-sheet modes require the configured ControlNet model in ComfyUI's ControlNet model folder; the current sprite-sheet path feeds the pose image directly to img2img + ControlNet and does not run a separate Canny preprocessing step.
+
+**Game asset presets:**
+
+```json
+{
+  "preset": "character_pixel",
+  "prompt": "small knight with a blue cape",
+  "outputPath": "C:/assets/knight.png",
+  "seed": 42
+}
+```
+
+Known presets are `character_pixel`, `character_cartoon`, `env_sprite_pixel`, `env_sprite_cartoon`, `background_pixel`, `background_cartoon`, `background_topdown_pixel`, `background_topdown_cartoon`, `ui_pixel`, and `ui_cartoon`. Presets own the model, sampler, dimensions, upscale, trim, and alpha settings; callers should normally provide only `preset`, `prompt`, `outputPath`, and optionally `seed` or `negativePrompt`. Env sprite and UI presets trim the white canvas and convert only edge-connected white background to alpha, preserving intentional interior white details.
 
 **Single image:**
 
@@ -365,6 +380,8 @@ ComfyUI must be running at `http://localhost:8188` (override with `COMFYUI_ENDPO
 | `checkpoint` | no | `COMFYUI_CHECKPOINT` env var | Checkpoint filename in `models/checkpoints/`. |
 | `sampler` | no | `"euler"` | ComfyUI sampler name. |
 | `scheduler` | no | `"normal"` | ComfyUI scheduler name. |
+| `trimBackground` | no | `false` | Crops connected white/transparent border pixels around the subject. |
+| `alphaFromWhite` | no | `false` | Converts only edge-connected near-white background to transparent alpha. |
 
 **Bulk image generation:**
 

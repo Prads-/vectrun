@@ -15,6 +15,7 @@ x86/
 bld/
 [Bb]in/
 [Oo]bj/
+[Pp]ublish/
 artifacts/
 
 # Test results
@@ -69,6 +70,7 @@ vectrun/ClientApp/dist/
 CLAUDE.md
 .claude/
 docs/superpowers/
+.superpowers/
 
 # ─── OS ──────────────────────────────────────────────────────────────────────
 

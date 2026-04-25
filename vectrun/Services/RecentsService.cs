@@ -6,24 +6,23 @@ public class RecentsService
 {
     private const int MaxRecents = 10;
 
-    private static readonly string FilePath = Path.Combine(
+    private static readonly string DefaultFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "vectrun",
         "recents.json");
 
+    private readonly string _filePath;
     private readonly object _lock = new();
+
+    public RecentsService() : this(DefaultFilePath) { }
+
+    public RecentsService(string filePath) => _filePath = filePath;
 
     public List<string> GetAll()
     {
         lock (_lock)
         {
-            if (!File.Exists(FilePath)) return [];
-            try
-            {
-                var json = File.ReadAllText(FilePath);
-                return JsonSerializer.Deserialize<List<string>>(json) ?? [];
-            }
-            catch { return []; }
+            return GetAllUnlocked();
         }
     }
 
@@ -53,18 +52,18 @@ public class RecentsService
 
     private List<string> GetAllUnlocked()
     {
-        if (!File.Exists(FilePath)) return [];
+        if (!File.Exists(_filePath)) return [];
         try
         {
-            var json = File.ReadAllText(FilePath);
+            var json = File.ReadAllText(_filePath);
             return JsonSerializer.Deserialize<List<string>>(json) ?? [];
         }
         catch { return []; }
     }
 
-    private static void Save(List<string> list)
+    private void Save(List<string> list)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        File.WriteAllText(FilePath, JsonSerializer.Serialize(list));
+        Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
+        File.WriteAllText(_filePath, JsonSerializer.Serialize(list));
     }
 }

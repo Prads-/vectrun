@@ -176,9 +176,9 @@ Performs file system operations: create directories, write text or binary files,
 
 ## image-generator
 
-Generates images via a locally running **ComfyUI** instance. Supports single images, bulk generation, and sprite sheets with IPAdapter-based character consistency.
+Generates images via a locally running **ComfyUI** instance. Supports single images, img2img, ControlNet, game-asset presets, composite sheets, and sprite sheets rendered from per-cell pose images.
 
-**Requires:** ComfyUI running locally (default `http://localhost:8188`).
+**Requires:** ComfyUI running locally (default `http://localhost:8188`). Queued prompts time out after 10 minutes.
 
 ### CLI
 
@@ -188,15 +188,28 @@ image-generator <file.json>
 
 Or via stdin (pipe a JSON file in).
 
+### Game asset presets
+
+```json
+{
+  "preset": "env_sprite_cartoon",
+  "prompt": "wooden treasure chest with gold trim",
+  "outputPath": "C:/Games/my-game/assets/chest.png",
+  "seed": 42
+}
+```
+
+Known presets are `character_pixel`, `character_cartoon`, `env_sprite_pixel`, `env_sprite_cartoon`, `background_pixel`, `background_cartoon`, `background_topdown_pixel`, `background_topdown_cartoon`, `ui_pixel`, and `ui_cartoon`. Presets own the checkpoint, LoRA, sampler, dimensions, upscale, trim, and alpha settings; callers should normally provide only `preset`, `prompt`, `outputPath`, and optionally `seed` or `negativePrompt`.
+
 ### Environment variables
 
 | Variable             | Default                                        | Description                                           |
 |----------------------|------------------------------------------------|-------------------------------------------------------|
 | `COMFYUI_ENDPOINT`   | `http://localhost:8188`                        | Base URL of the ComfyUI instance                      |
 | `COMFYUI_CHECKPOINT` | `v1-5-pruned-emaonly.safetensors`              | Default checkpoint filename                           |
-| `IPADAPTER_MODEL`    | `ip-adapter_sdxl.bin`                         | IPAdapter model filename (sprite sheets only)         |
-| `CLIP_VISION_MODEL`  | `CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors` | CLIP Vision model filename (sprite sheets only)       |
-| `CONTROLNET_MODEL`   | `control-lora-canny-rank256.safetensors`      | ControlNet model filename (used by `type: "controlnet"`) |
+| `CONTROLNET_MODEL`   | `control-lora-canny-rank256.safetensors`      | ControlNet model filename used by ControlNet and sprite-sheet modes |
+
+Upscaling (`upscaleBy > 0`, including several presets) requires the `UltimateSDUpscale` custom node and an upscaler model such as `RealESRGAN_x4plus.pth`.
 
 ### Single image (stdin JSON)
 
@@ -263,11 +276,9 @@ Images are generated one at a time. Each completed image prints `OK: <path> (<by
 
 ### Sprite sheet generation
 
-Generates a canonical character reference via text2img, then generates each cell independently via IPAdapter (character consistency) with a unique pose prompt per cell. All frames are resized and composited into a grid PNG using SkiaSharp.
+Generates each cell independently from a required `poseReferenceImage` via img2img + ControlNet, then resizes and composites frames into a grid PNG using SkiaSharp. The current path uses the pose image directly as ControlNet input; it does not run a separate Canny preprocessing step.
 
-**Requires:** `ComfyUI_IPAdapter_plus` custom node installed via ComfyUI Manager, plus:
-- `models/ipadapter/ip-adapter_sdxl.bin`
-- `models/clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors`
+**Requires:** a ControlNet model in ComfyUI's ControlNet model folder matching `CONTROLNET_MODEL` or the request's `controlNetModel`.
 
 ```json
 {
@@ -289,39 +300,39 @@ Generates a canonical character reference via text2img, then generates each cell
     "frameHeight": 128,
     "columns": 4,
     "rows": 2,
-    "ipAdapterWeight": 0.7,
-    "animations": [
-      { "row": 0, "col": 0, "prompt": "standing idle, arms relaxed at sides" },
-      { "row": 0, "col": 1, "prompt": "breathing in, chest slightly raised" },
-      { "row": 1, "col": 0, "prompt": "walking, left foot forward, right arm forward" },
-      { "row": 1, "col": 1, "prompt": "walking, right foot forward, left arm forward" }
+    "metadataPath": "assets/characters/hero_sheet.metadata.json",
+    "cells": [
+      { "row": 0, "col": 0, "label": "idle_0", "promptSuffix": "standing idle, arms relaxed at sides", "poseReferenceImage": "tmp/idle_0.png" },
+      { "row": 0, "col": 1, "label": "idle_1", "promptSuffix": "breathing in, chest slightly raised", "poseReferenceImage": "tmp/idle_1.png" },
+      { "row": 1, "col": 0, "label": "walk_0", "promptSuffix": "walking, left foot forward, right arm forward", "poseReferenceImage": "tmp/walk_0.png" },
+      { "row": 1, "col": 1, "label": "walk_1", "promptSuffix": "walking, right foot forward, left arm forward", "poseReferenceImage": "tmp/walk_1.png" }
     ]
   }]
 }
 ```
 
-Each `animations` entry is exactly one cell at `(row, col)` with a specific pose prompt. Cells not listed remain transparent. Frames are generated at `width × height` and resized to `frameWidth × frameHeight` when compositing. The output PNG is `columns × frameWidth` wide and `rows × frameHeight` tall.
+Each `cells` entry is exactly one cell at `(row, col)` with a specific pose prompt suffix and pose reference image. `animations` is still accepted as a backwards-compatible alias for `cells`. Cells not listed remain transparent. Frames are generated from the pose image and resized to `frameWidth x frameHeight` when compositing. The output PNG is `columns x frameWidth` wide and `rows x frameHeight` tall.
 
 **Sprite sheet fields:**
 
 | Field             | Default | Description                                                              |
 |-------------------|---------|--------------------------------------------------------------------------|
 | `type`            | —       | Must be `"sprite_sheet"`                                                 |
-| `characterPrompt` | —       | Appearance-only description used for the canonical reference sprite      |
-| `animations`      | —       | Array of `{ row, col, prompt }` — one entry per cell                    |
+| `characterPrompt` | -       | Appearance description combined with each cell prompt suffix             |
+| `cells`           | -       | Array of `{ row, col, label, promptSuffix, poseReferenceImage }` entries |
 | `frameWidth`      | `128`   | Width of each cell in the output grid (px)                               |
 | `frameHeight`     | `128`   | Height of each cell in the output grid (px)                              |
 | `columns`         | `6`     | Number of columns in the grid                                            |
 | `rows`            | `5`     | Number of rows in the grid                                               |
-| `ipAdapterWeight` | `0.7`   | IPAdapter influence strength (0.0–1.0)                                   |
+| `heroLabel`       | `""`    | Optional cell label marked as the hero in metadata                       |
+| `frameDirectory`  | output folder `frames` | Optional directory for generated frame PNGs                 |
+| `metadataPath`    | `""`    | Optional JSON metadata output path                                       |
 
 ### ControlNet (structure-preserving generation)
 
-Locks the generated image's composition (silhouette, pose, proportions) to the edges of a reference image, while letting SD render fully-detailed art on top. Typical use: rasterize a hand-authored SVG character pose and feed it here so SD renders a detailed sprite that matches the exact pose and layout.
+Locks the generated image's composition (silhouette, pose, proportions) to a reference image, while letting SD render fully-detailed art on top. Typical use: rasterize a hand-authored SVG character pose and feed it here so SD renders a detailed sprite that matches the exact pose and layout.
 
-**Requires:** a ControlNet model in `models/controlnet/` matching `CONTROLNET_MODEL`. Common choices:
-- `control-lora-canny-rank256.safetensors` — hard edges (default)
-- Lineart / Scribble variants — smoother, better for organic / hand-drawn inputs
+**Requires:** a ControlNet model in `models/controlnet/` matching `CONTROLNET_MODEL` or the request's `controlNetModel`. Choose a model that matches the kind of reference image you are feeding; this tool does not preprocess the reference into Canny edges.
 
 ```json
 {
@@ -344,7 +355,7 @@ Locks the generated image's composition (silhouette, pose, proportions) to the e
 | `controlNetModel`    | No       | `CONTROLNET_MODEL` env | ControlNet model filename in `models/controlnet/`.                          |
 | `controlNetStrength` | No       | `0.9`                  | How strictly composition follows the reference (0.0 ignored – 1.0 strict). |
 
-The same `referenceImage` field also drives `type: "img2img"` and `type: "ipadapter"` modes — ControlNet preserves structure, img2img rewrites the image at a chosen denoise strength, IPAdapter transfers style/subject.
+The same `referenceImage` field also drives `type: "img2img"` mode. ControlNet preserves structure; img2img rewrites the image at a chosen denoise strength.
 
 ### Recommended dimensions by asset type
 
@@ -364,9 +375,10 @@ The same `referenceImage` field also drives `type: "img2img"` and `type: "ipadap
 ### Notes
 
 - The tool polls ComfyUI every 2 seconds until the job completes.
-- HTTP client timeout is 10 minutes to accommodate slow generations.
+- HTTP requests and queued prompt polling time out after 10 minutes.
 - After all images are done, `POST /free` (`unload_models: true, free_memory: true`) is called automatically to release VRAM.
 - The `checkpoint` field is useful when you want different models for different asset categories (e.g. a pixel art LoRA for sprites, a different model for cinematic backgrounds).
+- `trimBackground` crops near-white or transparent borders; `alphaFromWhite` removes only edge-connected near-white background so interior white details are preserved.
 
 ---
 

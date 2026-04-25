@@ -1,5 +1,7 @@
 using System.Text.Json;
+using System.Threading.Channels;
 using vectrun.Api;
+using vectrun.Models;
 using vectrun.Pipeline;
 using vectrun.Services;
 
@@ -40,5 +42,19 @@ else
     };
 
     var pipeline = PipelineBuilder.Build(args[0]);
-    await PipelineRunner.RunAsync(pipeline, token: cts.Token);
+    var input = Console.IsInputRedirected ? await Console.In.ReadToEndAsync(cts.Token) : null;
+
+    var channel = Channel.CreateUnbounded<PipelineLogEntry>();
+    var logTask = Task.Run(async () =>
+    {
+        await foreach (var entry in channel.Reader.ReadAllAsync(cts.Token))
+        {
+            var trimmed = entry.Message is null ? "" : (entry.Message.Length > 200 ? entry.Message[..200] + "…" : entry.Message);
+            await Console.Error.WriteLineAsync($"[{entry.NodeId}] {entry.Event}: {trimmed}");
+        }
+    }, cts.Token);
+
+    await PipelineRunner.RunAsync(pipeline, input: input, log: channel.Writer, token: cts.Token);
+    channel.Writer.Complete();
+    await logTask;
 }
