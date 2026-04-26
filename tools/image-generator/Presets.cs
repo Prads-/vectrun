@@ -15,6 +15,8 @@ internal static class Presets
     [
         "character_pixel",
         "character_cartoon",
+        "character_static_pixel",
+        "character_static_cartoon",
         "env_sprite_pixel",
         "env_sprite_cartoon",
         "background_pixel",
@@ -31,6 +33,8 @@ internal static class Presets
     {
         "character_pixel"            => CharacterPixel          (u, http, endpoint),
         "character_cartoon"          => CharacterCartoon        (u, http, endpoint),
+        "character_static_pixel"     => CharacterStaticPixel    (u, http, endpoint),
+        "character_static_cartoon"   => CharacterStaticCartoon  (u, http, endpoint),
         "env_sprite_pixel"           => EnvSpritePixel          (u, http, endpoint),
         "env_sprite_cartoon"         => EnvSpriteCartoon        (u, http, endpoint),
         "background_pixel"           => BackgroundPixel         (u, http, endpoint),
@@ -111,6 +115,46 @@ internal static class Presets
         return ok;
     }
 
+    // ── Static character/enemy single sprite (pixel) ──────────────────────────
+    // Same character LoRA as the sheet preset, but no multi-view scaffolding.
+    // Used for entities that don't need walk frames: stationary enemies (turret,
+    // floating head, eye, fixed crystal), non-articulated forms with no clear
+    // front/back/sides. Trims to subject + alpha-from-white so the dev gets a
+    // single transparent PNG ready to drop in.
+    private static Task<bool> CharacterStaticPixel(ImageParams u, HttpClient http, string endpoint) =>
+        ComfyUiClient.GenerateTextToImg(BuildCharacterStaticPixel(u, u.OutputPath), http, endpoint);
+
+    // ── Static character/enemy single sprite (cartoon, two-pass) ──────────────
+    private static async Task<bool> CharacterStaticCartoon(ImageParams u, HttpClient http, string endpoint)
+    {
+        var temp = IntermediatePath(u.OutputPath);
+        var pass1 = BuildCharacterStaticPixel(u, temp) with
+        {
+            TrimBackground = false,
+            AlphaFromWhite = false,
+        };
+        if (!await ComfyUiClient.GenerateTextToImg(pass1, http, endpoint)) return false;
+
+        var pass2 = BuildCartoonRestyle(
+            u, temp,
+            scaffoldPrompt: "cartoon, cartoon style, flat colors, bold outlines, 2d, isolated, centered, solo, single subject, full body, front view",
+            scaffoldSuffix: "white background",
+            defaultNegative: "pixel art, pixelated, painterly, oil painting, realistic, photorealistic, blurry, text, logo, watermark, ui, sprite sheet, multiple views, from side, looking away, from behind, back, walk cycle, (picture frame:1.4), (image border:1.4), (matte border:1.3), framed image, decorative border, panel border");
+
+        var pass2WithAlpha = pass2 with
+        {
+            TrimBackground = true,
+            TrimPadding    = 8,
+            TrimTolerance  = 40,
+            AlphaFromWhite = true,
+            AlphaThreshold = 40,
+        };
+
+        var ok = await ComfyUiClient.GenerateImgToImg(pass2WithAlpha, http, endpoint);
+        TryDelete(temp);
+        return ok;
+    }
+
     // ── Recipe 5: background (pixel hybrid 70:30, two-pass) ───────────────────
     private static async Task<bool> BackgroundPixel(ImageParams u, HttpClient http, string endpoint)
     {
@@ -153,6 +197,36 @@ internal static class Presets
         UpscaleMaskBlur    = 8,
         UpscalePadding     = 32,
         TrimBackground     = false,
+        Type               = "",
+    };
+
+    private static ImageParams BuildCharacterStaticPixel(ImageParams u, string outputPath) => u with
+    {
+        Prompt             = Wrap("pixel_character_sprite, pxlchrctrsprt, sprite, sprite art, pixel, (pixel art:1.5), retro game, vibrant colors, pixelated, isolated, centered, solo, single subject, full body, front view", u.Prompt, "(pure white background:1.4), flat white background, no shadow, no environment"),
+        NegativePrompt     = AppendUserNeg("sprite sheet, multiple views, grid, tiled, from side, looking away, from behind, back, walk cycle, scene, background, room, interior, floor, shadow, vignette, gradient, lighting, (picture frame:1.4), (image border:1.4), (matte border:1.3), framed image, frame around image, decorative border, outlined edges, panel border, sprite sheet border", u.NegativePrompt),
+        OutputPath         = outputPath,
+        Checkpoint         = "prefect_illustrious_xl_v3.fp16.safetensors",
+        Lora               = "pixel_character_sprite_illustrious.safetensors",
+        LoraStrength       = 0.7,
+        ClipSkip           = 2,
+        Sampler            = "euler_ancestral",
+        Scheduler          = "normal",
+        Steps              = 100,
+        Cfg                = 5.0,
+        Width              = 1024,
+        Height             = 1024,
+        UpscaleBy          = 2.0,
+        UpscaleModel       = "RealESRGAN_x4plus.pth",
+        UpscaleDenoise     = 0.15,
+        UpscaleTileWidth   = 1024,
+        UpscaleTileHeight  = 1024,
+        UpscaleMaskBlur    = 8,
+        UpscalePadding     = 32,
+        TrimBackground     = true,
+        TrimPadding        = 8,
+        TrimTolerance      = 40,
+        AlphaFromWhite     = true,
+        AlphaThreshold     = 40,
         Type               = "",
     };
 
