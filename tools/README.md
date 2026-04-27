@@ -12,6 +12,7 @@ dotnet build tools/kv-store/kv-store.csproj               -c Release
 dotnet build tools/scaffold-claude/scaffold-claude.csproj  -c Release
 dotnet build tools/file-manager/file-manager.csproj        -c Release
 dotnet build tools/image-generator/image-generator.csproj  -c Release
+dotnet build tools/music-generator/music-generator.csproj  -c Release
 dotnet build tools/ollama-stop/ollama-stop.csproj          -c Release
 dotnet build tools/svg-rasterize/svg-rasterize.csproj      -c Release
 ```
@@ -183,23 +184,44 @@ Generates images via a locally running **ComfyUI** instance. Supports single ima
 ### CLI
 
 ```bash
-image-generator <file.json>
+image-generator <file.json>          # generate from JSON config
+image-generator probe <png>          # print alpha histogram + sample opaque pixels
+image-generator alpha <in> <out> [tolerance]  # flood-fill bg removal (no ComfyUI needed)
+image-generator harden <in> <out>    # post-process an ML-segmented PNG: snap interior
+                                     # body to opaque, fill holes with median body colour
 ```
 
-Or via stdin (pipe a JSON file in).
+The default `image-generator <file.json>` mode also accepts JSON via stdin.
 
 ### Game asset presets
 
 ```json
 {
-  "preset": "env_sprite_cartoon",
-  "prompt": "wooden treasure chest with gold trim",
-  "outputPath": "C:/Games/my-game/assets/chest.png",
+  "preset": "character_static_cartoon",
+  "prompt": "creature, glowing crystal slime, teal and cyan, no face, amorphous",
+  "outputPath": "C:/Games/my-game/assets/slime.png",
   "seed": 42
 }
 ```
 
-Known presets are `character_pixel`, `character_cartoon`, `env_sprite_pixel`, `env_sprite_cartoon`, `background_pixel`, `background_cartoon`, `background_topdown_pixel`, `background_topdown_cartoon`, `ui_pixel`, and `ui_cartoon`. Presets own the checkpoint, LoRA, sampler, dimensions, upscale, trim, and alpha settings; callers should normally provide only `preset`, `prompt`, `outputPath`, and optionally `seed` or `negativePrompt`.
+Known presets:
+
+| Preset                       | Use case                                                              |
+|------------------------------|-----------------------------------------------------------------------|
+| `character_pixel`            | Sprite-sheet character (humans, humanoids, animals — has walk cycle)  |
+| `character_cartoon`          | Sprite-sheet character, cartoon style                                 |
+| `character_static_pixel`     | Single-sprite character (turrets, floating heads — no walk cycle)     |
+| `character_static_cartoon`   | Single-sprite character, cartoon style                                |
+| `env_sprite_pixel`           | Props, items, hazards (chests, crates, etc.)                          |
+| `env_sprite_cartoon`         | Props, items, hazards, cartoon style                                  |
+| `background_pixel`           | Side-scrolling level background                                       |
+| `background_cartoon`         | Side-scrolling level background, cartoon style                        |
+| `background_topdown_pixel`   | Top-down level background                                             |
+| `background_topdown_cartoon` | Top-down level background, cartoon style                              |
+| `ui_pixel`                   | UI panels, icons, HUD elements                                        |
+| `ui_cartoon`                 | UI panels, icons, HUD elements, cartoon style                         |
+
+All four `character_*` presets use ML foreground segmentation (ComfyUI-RMBG node, `INSPYRENET` model by default) for background removal — works regardless of body / background colour overlap. `env_sprite_*` and `ui_*` presets use the simpler edge-connected flood-fill (`alphaFromWhite`). Presets own the checkpoint, LoRA, sampler, dimensions, upscale, trim, and alpha settings; callers should normally provide only `preset`, `prompt`, `outputPath`, and optionally `seed` or `negativePrompt`.
 
 ### Environment variables
 
@@ -228,6 +250,19 @@ Upscaling (`upscaleBy > 0`, including several presets) requires the `UltimateSDU
   "scheduler": "karras"
 }
 ```
+
+#### Background removal options
+
+| Field              | Default        | Description                                                                        |
+|--------------------|----------------|------------------------------------------------------------------------------------|
+| `alphaFromWhite`   | `false`        | Edge-connected flood-fill that auto-detects the dominant edge colour and clears matching pixels. Works for solid backgrounds; preserves interior details of the same colour. |
+| `alphaThreshold`   | `15`           | Manhattan-distance tolerance per channel for the flood-fill match.                 |
+| `removeBackground` | `false`        | ML foreground segmentation via the ComfyUI-RMBG custom node — works regardless of bg / body colour overlap. Output is automatically passed through `HardenAlpha` to snap the body to fully opaque. |
+| `bgRemovalModel`   | `"INSPYRENET"` | RMBG model. Other valid values: `"RMBG-2.0"`, `"BEN"`, `"BEN2"`. INSPYRENET is the default because RMBG-2.0 has compatibility issues with newer transformers versions. |
+
+Use `alphaFromWhite` for solid-background prop / UI generations and `removeBackground` for characters where the body might overlap the bg colour. The two are independent and can run together (alpha first, then ML), though that is rarely needed.
+
+The `removeBackground` path requires the `1038lab/ComfyUI-RMBG` custom node installed in your ComfyUI `custom_nodes/` directory, with `pip install -r requirements.txt`. Models auto-download on first use.
 
 ### Bulk image generation (stdin JSON)
 
@@ -379,6 +414,94 @@ The same `referenceImage` field also drives `type: "img2img"` mode. ControlNet p
 - After all images are done, `POST /free` (`unload_models: true, free_memory: true`) is called automatically to release VRAM.
 - The `checkpoint` field is useful when you want different models for different asset categories (e.g. a pixel art LoRA for sprites, a different model for cinematic backgrounds).
 - `trimBackground` crops near-white or transparent borders; `alphaFromWhite` removes only edge-connected near-white background so interior white details are preserved.
+- When `removeBackground` is set, the saved PNG is also run through `HardenAlpha`, which fills any partially-transparent body interior with the median body colour. Use the `harden` CLI directly if you need to repair an already-keyed PNG without regenerating.
+
+---
+
+## music-generator
+
+Generates MP3 music via a locally running **ComfyUI** instance using the **ACE-Step v1.5** music model. Reads a prompt + duration, returns an MP3 saved to `outputPath`.
+
+**Requires:** ComfyUI running locally with these model files in place:
+- `models/unet/acestep_v1.5_turbo.safetensors`
+- `models/text_encoders/qwen_0.6b_ace15.safetensors` *(both Qwen files required)*
+- `models/text_encoders/qwen_4b_ace15.safetensors`   *(both Qwen files required)*
+- `models/vae/ace_1.5_vae.safetensors`
+
+ACE-Step v1.5 needs **both** Qwen encoders loaded via `DualCLIPLoader`; using only one produces conditioning with `pooled_output=None` which crashes the sampler.
+
+ACE-Step nodes are built into ComfyUI core (no custom node needed). Queued prompts time out after 10 minutes.
+
+### CLI
+
+```bash
+music-generator <file.json>      # generate from JSON config
+cat file.json | music-generator  # or pipe via stdin
+music-generator --help
+```
+
+### Single track (stdin JSON)
+
+```json
+{
+  "prompt": "epic orchestral, strings, brass, hopeful, victory theme",
+  "outputPath": "C:/Games/my-game/assets/audio/menu.mp3",
+  "duration": 30,
+  "lyrics": "",
+  "negativePrompt": "low quality, distorted, noisy",
+  "bpm": 120,
+  "language": "en",
+  "seed": 42,
+  "steps": 8,
+  "cfg": 1.0,
+  "quality": "V0"
+}
+```
+
+### Bulk (stdin JSON)
+
+```json
+{
+  "defaults": { "duration": 30, "steps": 8, "cfg": 1.0 },
+  "tracks": [
+    { "prompt": "8-bit chiptune, upbeat, fast, victory",  "outputPath": "C:/.../menu.mp3" },
+    { "prompt": "ambient pads, eerie, slow, low strings", "outputPath": "C:/.../boss.mp3" }
+  ]
+}
+```
+
+### Fields
+
+| Field            | Required | Default | Description                                                          |
+|------------------|----------|---------|----------------------------------------------------------------------|
+| `prompt`         | Yes      | —       | Style / genre / instrument tags (passed to `tags` on the encoder)    |
+| `outputPath`     | Yes      | —       | Absolute path where the MP3 is saved                                 |
+| `duration`       | No       | `30`    | Track length in seconds                                              |
+| `lyrics`         | No       | `""`    | Lyrics for vocals (omit for instrumental)                            |
+| `negativePrompt` | No       | tuned   | Tags to avoid; defaults to a sensible quality-bias baseline          |
+| `bpm`            | No       | `120`   | Target tempo                                                         |
+| `language`       | No       | `"en"`  | Language tag (en/ja/zh/es/de/fr/pt/ru/it/...)                        |
+| `seed`           | No       | random  | Fixed seed for reproducible generations                              |
+| `steps`          | No       | `8`     | KSampler steps (turbo model — bump for non-turbo checkpoints)        |
+| `cfg`            | No       | `1.0`   | KSampler CFG (turbo wants 1.0; full ACE-Step uses ~5.0)              |
+| `quality`        | No       | `"V0"`  | MP3 encoding quality. One of `V0` (best VBR), `128k`, `320k`         |
+
+### Environment variables
+
+| Variable           | Default                  | Description                       |
+|--------------------|--------------------------|-----------------------------------|
+| `COMFYUI_ENDPOINT` | `http://localhost:8188`  | Base URL of the ComfyUI instance  |
+
+### Output
+
+`OK: <outputPath> (<bytes> bytes)` per track, then `OK: N track(s) generated.` at the end of a batch.
+
+### Notes
+
+- The tool polls ComfyUI every 2 seconds until the job completes.
+- After all tracks are done, `POST /free` is called to release VRAM.
+- The default sampler is `euler` with `simple` scheduler — proven combo for ACE-Step. If you need different behaviour, adjust `Program.cs` / `ComfyUiClient.cs` rather than exposing more knobs to callers.
+- Only `tags` (style/genre) and `lyrics` (optional vocals) are passed to the text encoder; the encoder's other knobs (timesignature, keyscale, temperature, top_p) stay at their ComfyUI defaults.
 
 ---
 

@@ -47,22 +47,23 @@ internal static class Presets
     };
 
     // ── Recipe 1: character sprite sheet (pixel) ──────────────────────────────
-    // Final output gets alpha-from-white so the developer can drop sheets straight
-    // into a Canvas / Phaser texture without a runtime color-key step. Do NOT trim
-    // background — the 4×4 grid layout must be preserved in pixel coordinates.
+    // Final output is run through ML background segmentation (RMBG-2.0) so the
+    // developer can drop sheets straight into a Canvas / Phaser texture without
+    // worrying about alpha. Do NOT trim background — the 4×4 grid layout must
+    // be preserved in pixel coordinates.
     private static Task<bool> CharacterPixel(ImageParams u, HttpClient http, string endpoint)
     {
         var p = BuildCharacterPixel(u, u.OutputPath) with
         {
-            AlphaFromWhite = true,
-            AlphaThreshold = 40,
+            RemoveBackground = true,
+            DespeckleAlpha   = 1500,
         };
         return ComfyUiClient.GenerateTextToImg(p, http, endpoint);
     }
 
     // ── Recipe 1 → Recipe 4: character sprite sheet (cartoon, two-pass) ───────
     // Pass 1 stays opaque (it's an intermediate that pass 2 reads as input).
-    // Pass 2 is the FINAL output, so alpha-from-white is applied there.
+    // Pass 2 is the FINAL output, so ML bg removal is applied there.
     private static async Task<bool> CharacterCartoon(ImageParams u, HttpClient http, string endpoint)
     {
         var temp = IntermediatePath(u.OutputPath);
@@ -71,12 +72,12 @@ internal static class Presets
 
         var pass2 = BuildCartoonRestyle(
             u, temp,
-            scaffoldPrompt: "cartoon, cartoon style, flat colors, bold outlines, 2d, sprite sheet, multiple views, chibi, from side, looking away, from behind, back",
+            scaffoldPrompt: "cartoon, cartoon style, flat colors, bold outlines, 2d, chibi, 4 rows, 4 columns, front, left, right, back",
             scaffoldSuffix: "white background",
             defaultNegative: "pixel art, pixelated, painterly, oil painting, realistic, photorealistic, blurry, text, logo, watermark, ui, (picture frame:1.4), (image border:1.4), (matte border:1.3), framed image, frame around image, decorative border, outlined edges, panel border, sprite sheet border") with
         {
-            AlphaFromWhite = true,
-            AlphaThreshold = 40,
+            RemoveBackground = true,
+            DespeckleAlpha   = 1500,
         };
 
         var ok = await ComfyUiClient.GenerateImgToImg(pass2, http, endpoint);
@@ -84,33 +85,49 @@ internal static class Presets
         return ok;
     }
 
-    // ── Recipe 2: isolated env sprite (pixel + trim) ──────────────────────────
-    private static Task<bool> EnvSpritePixel(ImageParams u, HttpClient http, string endpoint) =>
-        ComfyUiClient.GenerateTextToImg(BuildEnvSpritePixel(u, u.OutputPath), http, endpoint);
+    // ── Recipe 2: isolated env sprite (pixel) ─────────────────────────────────
+    // Uses ML foreground segmentation (RemoveBackground) — same path as character
+    // sprites — because edge-flood AlphaFromWhite was unreliable when the model
+    // produced soft shadows or coloured halos near the image edges.
+    private static Task<bool> EnvSpritePixel(ImageParams u, HttpClient http, string endpoint)
+    {
+        var p = BuildEnvSpritePixel(u, u.OutputPath) with
+        {
+            TrimBackground   = false,
+            AlphaFromWhite   = false,
+            RemoveBackground = true,
+            DespeckleAlpha   = 1500,
+        };
+        return ComfyUiClient.GenerateTextToImg(p, http, endpoint);
+    }
 
     // ── Recipe 2 → Recipe 4: isolated env sprite (cartoon, two-pass) ──────────
+    // Pass 1 stays opaque (intermediate). Pass 2 final output runs through ML
+    // segmentation + despeckle for clean alpha — same as character_cartoon.
     private static async Task<bool> EnvSpriteCartoon(ImageParams u, HttpClient http, string endpoint)
     {
         var temp = IntermediatePath(u.OutputPath);
-        var pass1 = BuildEnvSpritePixel(u, temp) with { AlphaFromWhite = false };
+        var pass1 = BuildEnvSpritePixel(u, temp) with
+        {
+            TrimBackground   = false,
+            AlphaFromWhite   = false,
+            RemoveBackground = false, // intermediate stays opaque
+        };
         if (!await ComfyUiClient.GenerateTextToImg(pass1, http, endpoint)) return false;
 
         var pass2 = BuildCartoonRestyle(
             u, temp,
             scaffoldPrompt: "cartoon, cartoon style, flat colors, bold outlines, 2d, simple background, white background, isolated, centered, solo, no humans, game asset",
             scaffoldSuffix: "",
-            defaultNegative: "pixel art, pixelated, painterly, oil painting, realistic, photorealistic, blurry, text, logo, watermark, frame, border, ui, scene, background, room, interior, 1girl, 1boy, character, person, human, face");
-
-        var pass2WithAlpha = pass2 with
+            defaultNegative: "pixel art, pixelated, painterly, oil painting, realistic, photorealistic, blurry, text, logo, watermark, frame, border, ui, scene, background, room, interior, 1girl, 1boy, character, person, human, face") with
         {
-            TrimBackground = true,
-            TrimPadding    = 8,
-            TrimTolerance  = 40,
-            AlphaFromWhite = true,
-            AlphaThreshold = 40,
+            TrimBackground   = false,
+            AlphaFromWhite   = false,
+            RemoveBackground = true,
+            DespeckleAlpha   = 1500,
         };
 
-        var ok = await ComfyUiClient.GenerateImgToImg(pass2WithAlpha, http, endpoint);
+        var ok = await ComfyUiClient.GenerateImgToImg(pass2, http, endpoint);
         TryDelete(temp);
         return ok;
     }
@@ -119,10 +136,19 @@ internal static class Presets
     // Same character LoRA as the sheet preset, but no multi-view scaffolding.
     // Used for entities that don't need walk frames: stationary enemies (turret,
     // floating head, eye, fixed crystal), non-articulated forms with no clear
-    // front/back/sides. Trims to subject + alpha-from-white so the dev gets a
-    // single transparent PNG ready to drop in.
-    private static Task<bool> CharacterStaticPixel(ImageParams u, HttpClient http, string endpoint) =>
-        ComfyUiClient.GenerateTextToImg(BuildCharacterStaticPixel(u, u.OutputPath), http, endpoint);
+    // front/back/sides. ML bg removal cleans the background regardless of body
+    // colour overlap (white robot on white bg works perfectly with RMBG-2.0).
+    private static Task<bool> CharacterStaticPixel(ImageParams u, HttpClient http, string endpoint)
+    {
+        var p = BuildCharacterStaticPixel(u, u.OutputPath) with
+        {
+            TrimBackground   = false, // RMBG produces clean alpha; no need to trim. Caller can trim post-hoc if needed.
+            AlphaFromWhite   = false,
+            RemoveBackground = true,
+            DespeckleAlpha   = 1500,
+        };
+        return ComfyUiClient.GenerateTextToImg(p, http, endpoint);
+    }
 
     // ── Static character/enemy single sprite (cartoon, two-pass) ──────────────
     private static async Task<bool> CharacterStaticCartoon(ImageParams u, HttpClient http, string endpoint)
@@ -130,8 +156,9 @@ internal static class Presets
         var temp = IntermediatePath(u.OutputPath);
         var pass1 = BuildCharacterStaticPixel(u, temp) with
         {
-            TrimBackground = false,
-            AlphaFromWhite = false,
+            TrimBackground   = false,
+            AlphaFromWhite   = false,
+            RemoveBackground = false, // intermediate stays opaque so pass 2 has a normal RGB image to restyle
         };
         if (!await ComfyUiClient.GenerateTextToImg(pass1, http, endpoint)) return false;
 
@@ -139,18 +166,15 @@ internal static class Presets
             u, temp,
             scaffoldPrompt: "cartoon, cartoon style, flat colors, bold outlines, 2d, isolated, centered, solo, single subject, full body, front view",
             scaffoldSuffix: "white background",
-            defaultNegative: "pixel art, pixelated, painterly, oil painting, realistic, photorealistic, blurry, text, logo, watermark, ui, sprite sheet, multiple views, from side, looking away, from behind, back, walk cycle, (picture frame:1.4), (image border:1.4), (matte border:1.3), framed image, decorative border, panel border");
-
-        var pass2WithAlpha = pass2 with
+            defaultNegative: "pixel art, pixelated, painterly, oil painting, realistic, photorealistic, blurry, text, logo, watermark, ui, sprite sheet, 4x4 sprite sheet, multiple views, left, right, back, walk cycle, (picture frame:1.4), (image border:1.4), (matte border:1.3), framed image, decorative border, panel border") with
         {
-            TrimBackground = true,
-            TrimPadding    = 8,
-            TrimTolerance  = 40,
-            AlphaFromWhite = true,
-            AlphaThreshold = 40,
+            TrimBackground   = false,
+            AlphaFromWhite   = false,
+            RemoveBackground = true,
+            DespeckleAlpha   = 1500,
         };
 
-        var ok = await ComfyUiClient.GenerateImgToImg(pass2WithAlpha, http, endpoint);
+        var ok = await ComfyUiClient.GenerateImgToImg(pass2, http, endpoint);
         TryDelete(temp);
         return ok;
     }
@@ -176,7 +200,7 @@ internal static class Presets
 
     private static ImageParams BuildCharacterPixel(ImageParams u, string outputPath) => u with
     {
-        Prompt             = Wrap("pixel_character_sprite, pxlchrctrsprt, sprite, sprite sheet, sprite art, pixel, (pixel art:1.5), retro game, vibrant colors, pixelated, multiple views, concept art, (chibi:1.5), from side, looking away, from behind, back", u.Prompt, "white background"),
+        Prompt             = Wrap("pixel_character_sprite, pxlchrctrsprt, sprite, sprite sheet, sprite art, pixel, (pixel art:1.5), retro game, vibrant colors, pixelated, (chibi:1.5), 4 rows, 4 columns, front, left, right, back", u.Prompt, "white background"),
         NegativePrompt     = AppendUserNeg("(picture frame:1.4), (image border:1.4), (matte border:1.3), framed image, frame around image, decorative border, outlined edges, panel border, sprite sheet border", u.NegativePrompt),
         OutputPath         = outputPath,
         Checkpoint         = "prefect_illustrious_xl_v3.fp16.safetensors",
@@ -203,7 +227,7 @@ internal static class Presets
     private static ImageParams BuildCharacterStaticPixel(ImageParams u, string outputPath) => u with
     {
         Prompt             = Wrap("pixel_character_sprite, pxlchrctrsprt, sprite, sprite art, pixel, (pixel art:1.5), retro game, vibrant colors, pixelated, isolated, centered, solo, single subject, full body, front view", u.Prompt, "(pure white background:1.4), flat white background, no shadow, no environment"),
-        NegativePrompt     = AppendUserNeg("sprite sheet, multiple views, grid, tiled, from side, looking away, from behind, back, walk cycle, scene, background, room, interior, floor, shadow, vignette, gradient, lighting, (picture frame:1.4), (image border:1.4), (matte border:1.3), framed image, frame around image, decorative border, outlined edges, panel border, sprite sheet border", u.NegativePrompt),
+        NegativePrompt     = AppendUserNeg("sprite sheet, 4x4 sprite sheet, multiple views, grid, tiled, left, right, back, walk cycle, scene, background, room, interior, floor, shadow, vignette, gradient, lighting, (picture frame:1.4), (image border:1.4), (matte border:1.3), framed image, frame around image, decorative border, outlined edges, panel border, sprite sheet border", u.NegativePrompt),
         OutputPath         = outputPath,
         Checkpoint         = "prefect_illustrious_xl_v3.fp16.safetensors",
         Lora               = "pixel_character_sprite_illustrious.safetensors",

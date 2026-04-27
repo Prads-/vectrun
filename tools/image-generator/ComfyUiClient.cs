@@ -88,8 +88,41 @@ internal static class ComfyUiClient
         }
     }
 
-    private static object[] FinalImageRef(ImageParams p) =>
+    private static object[] PreBgRemovalImageRef(ImageParams p) =>
         p.UpscaleBy > 0 ? new object[] { "U2", 0 } : new object[] { "6", 0 };
+
+    // FinalImageRef points at whatever node feeds SaveImage. If RemoveBackground
+    // is enabled the BG1 node sits between the upscaler/VAE and SaveImage.
+    private static object[] FinalImageRef(ImageParams p) =>
+        p.RemoveBackground ? new object[] { "BG1", 0 } : PreBgRemovalImageRef(p);
+
+    // Adds a ComfyUI-RMBG node that runs ML-based foreground segmentation on
+    // whatever feeds it. Replaces the brittle EdgeBackgroundToAlpha flood-fill
+    // for character/static-character presets — works regardless of bg colour or
+    // body colour overlap. Requires the `1038lab/ComfyUI-RMBG` custom node and
+    // the corresponding model weights (auto-downloaded on first use).
+    private static void AddBgRemovalNode(Dictionary<string, object> workflow, ImageParams p)
+    {
+        if (!p.RemoveBackground) return;
+
+        workflow["BG1"] = new
+        {
+            class_type = "RMBG",
+            inputs     = new
+            {
+                image             = PreBgRemovalImageRef(p),
+                model             = string.IsNullOrWhiteSpace(p.BgRemovalModel) ? "INSPYRENET" : p.BgRemovalModel,
+                sensitivity       = 1.0,
+                process_res       = 2048,
+                mask_blur         = 0,
+                mask_offset       = 0,
+                invert_output     = false,
+                refine_foreground = true,
+                background        = "Alpha",
+                background_color  = "#222222"
+            }
+        };
+    }
 
     private static void AddUpscaleNodes(Dictionary<string, object> workflow, ImageParams p, object[] modelRef)
     {
@@ -172,6 +205,7 @@ internal static class ComfyUiClient
         };
         AddLoraAndClipSkipNodes(workflow, p);
         AddUpscaleNodes(workflow, p, modelRef);
+        AddBgRemovalNode(workflow, p);
 
         return await QueueAndSave(workflow, p, http, endpoint, needsResize ? (p.Width, p.Height) : null);
     }
@@ -219,6 +253,7 @@ internal static class ComfyUiClient
         };
         AddLoraAndClipSkipNodes(workflow, p);
         AddUpscaleNodes(workflow, p, modelRef);
+        AddBgRemovalNode(workflow, p);
 
         return await QueueAndSave(workflow, p, http, endpoint);
     }
@@ -285,6 +320,7 @@ internal static class ComfyUiClient
         };
         AddLoraAndClipSkipNodes(workflow, p);
         AddUpscaleNodes(workflow, p, modelRef);
+        AddBgRemovalNode(workflow, p);
 
         return await QueueAndSave(workflow, p, http, endpoint);
     }
@@ -353,6 +389,7 @@ internal static class ComfyUiClient
         };
         AddLoraAndClipSkipNodes(workflow, p);
         AddUpscaleNodes(workflow, p, modelRef);
+        AddBgRemovalNode(workflow, p);
 
         return await QueueAndSave(workflow, p, http, endpoint, needsResize ? (p.Width, p.Height) : null);
     }
@@ -476,8 +513,29 @@ internal static class ComfyUiClient
 
         if (p.AlphaFromWhite)
         {
-            try   { imageBytes = WhiteToAlpha(imageBytes, p.AlphaThreshold); }
+            try   { imageBytes = EdgeBackgroundToAlpha(imageBytes, p.AlphaThreshold); }
             catch (Exception ex) { Console.Error.WriteLine($"  Failed to apply alpha: {ex.Message}"); return false; }
+        }
+
+        // ML segmentation (RemoveBackground via RMBG node) often leaves the body
+        // interior partially or fully transparent — especially for "holographic"
+        // or "glitchy" prompts where the model classifies the body as see-through.
+        // HardenAlpha snaps interior pixels to opaque and fills enclosed holes
+        // with the dominant body colour so the character stays visible against
+        // any game background.
+        if (p.RemoveBackground)
+        {
+            try   { imageBytes = HardenAlpha(imageBytes); }
+            catch (Exception ex) { Console.Error.WriteLine($"  Failed to harden alpha: {ex.Message}"); return false; }
+        }
+
+        // Connected-components cleanup: drop floating opaque fragments left over
+        // by ML segmentation (ghosts of dark BG that the matte didn't fully cull).
+        // Runs after Harden so we operate on the final opaque/transparent classification.
+        if (p.DespeckleAlpha > 0)
+        {
+            try   { imageBytes = DespeckleAlpha(imageBytes, p.DespeckleAlpha); }
+            catch (Exception ex) { Console.Error.WriteLine($"  Failed to despeckle alpha: {ex.Message}"); return false; }
         }
 
         if (resizeTarget is (int targetW, int targetH))
@@ -570,61 +628,337 @@ internal static class ComfyUiClient
         return data.ToArray();
     }
 
-    // Converts only edge-connected near-white background pixels to transparent.
-    // Interior whites are preserved so UI highlights and sprite details are not
-    // punched out.
-    private static byte[] WhiteToAlpha(byte[] pngBytes, int tolerance)
+    // Snaps every interior body pixel to fully opaque while preserving silhouette
+    // edge AA and true-background transparency. Used after ML segmentation
+    // (RemoveBackground) where INSPYRENET / RMBG produce soft mattes — for
+    // "translucent-style" prompts (holographic, glitchy, ghostly) the model
+    // tells the segmenter the body is transparent, leaving alpha=0 throughout
+    // the body interior. Composited over a non-flat game bg the character
+    // would look see-through (or worse, render as a black blob if RGB at
+    // alpha=0 is preserved as zero).
+    //
+    // Algorithm:
+    //   1. Flood-fill alpha=0 from the image border → "true background" mask.
+    //   2. Compute the median RGB across all alpha > 200 pixels — this is
+    //      the dominant body colour, sampled from features the segmenter
+    //      kept opaque (silhouette ring, eyes, accents).
+    //   3. For each non-true-background pixel:
+    //      - If any 4-neighbour is true-background → silhouette edge, keep alpha.
+    //      - Else if alpha = 0 → enclosed hole, fill with bodyColour, alpha=255.
+    //      - Else (alpha > 0) → snap to alpha=255 keeping its existing RGB
+    //        (preserves intentional dark accents like eyes / shading).
+    //
+    // We use a single dominant body colour rather than per-pixel dilation
+    // because dilation would pick up dark accent pixels (eyes, outlines)
+    // and propagate them through the empty interior, painting the body black.
+    public static byte[] HardenAlpha(byte[] pngBytes)
+    {
+        // Decode without premultiplication so RGB is preserved at alpha=0
+        // pixels (default SKBitmap.Decode would zero them out).
+        using var inData = SKData.CreateCopy(pngBytes);
+        using var codec = SKCodec.Create(inData) ?? throw new InvalidOperationException("Could not create codec for alpha harden.");
+        var info = new SKImageInfo(codec.Info.Width, codec.Info.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using var dst = new SKBitmap(info);
+        var result = codec.GetPixels(info, dst.GetPixels());
+        if (result != SKCodecResult.Success && result != SKCodecResult.IncompleteInput)
+            throw new InvalidOperationException($"PNG decode failed for alpha harden: {result}");
+
+        var w = dst.Width;
+        var h = dst.Height;
+        var pixels = dst.Pixels;  // SKColor[w*h], indexed y*w + x
+
+        // Step 1: flood-fill alpha=0 from the image border to identify true background.
+        var outside = new bool[w * h];
+        var stack = new Stack<int>(w * 4);
+        void Seed(int x, int y)
+        {
+            if (x < 0 || y < 0 || x >= w || y >= h) return;
+            var i = y * w + x;
+            if (outside[i]) return;
+            if (pixels[i].Alpha != 0) return;
+            outside[i] = true;
+            stack.Push(i);
+        }
+        for (var x = 0; x < w; x++) { Seed(x, 0); Seed(x, h - 1); }
+        for (var y = 0; y < h; y++) { Seed(0, y); Seed(w - 1, y); }
+        while (stack.Count > 0)
+        {
+            var i = stack.Pop();
+            var x = i % w;
+            var y = i / w;
+            if (x > 0)     Seed(x - 1, y);
+            if (x < w - 1) Seed(x + 1, y);
+            if (y > 0)     Seed(x, y - 1);
+            if (y < h - 1) Seed(x, y + 1);
+        }
+
+        // Step 2: compute median RGB across high-alpha pixels (the dominant body colour).
+        var rs = new List<byte>();
+        var gs = new List<byte>();
+        var bs = new List<byte>();
+        for (var i = 0; i < pixels.Length; i++)
+        {
+            var c = pixels[i];
+            if (c.Alpha < 200) continue;
+            rs.Add(c.Red); gs.Add(c.Green); bs.Add(c.Blue);
+        }
+
+        SKColor bodyColour;
+        if (rs.Count > 0)
+        {
+            rs.Sort(); gs.Sort(); bs.Sort();
+            var mid = rs.Count / 2;
+            bodyColour = new SKColor(rs[mid], gs[mid], bs[mid], 255);
+        }
+        else
+        {
+            // Fallback: no opaque source pixels at all. Use mid-grey.
+            bodyColour = new SKColor(128, 128, 128, 255);
+        }
+
+        // Step 3: classify and snap.
+        var hardened = 0;
+        var edgesKept = 0;
+        var holesFilled = 0;
+        var changed = new SKColor[pixels.Length];
+        Array.Copy(pixels, changed, pixels.Length);
+
+        for (var y = 0; y < h; y++)
+        {
+            for (var x = 0; x < w; x++)
+            {
+                var i = y * w + x;
+                if (outside[i]) continue;  // true bg, alpha=0
+
+                var isEdge =
+                    (x > 0     && outside[i - 1]) ||
+                    (x < w - 1 && outside[i + 1]) ||
+                    (y > 0     && outside[i - w]) ||
+                    (y < h - 1 && outside[i + w]);
+
+                var c = pixels[i];
+                if (isEdge)
+                {
+                    if (c.Alpha < 255) edgesKept++;
+                    continue;  // preserve silhouette AA
+                }
+
+                if (c.Alpha == 0)
+                {
+                    changed[i] = bodyColour;
+                    holesFilled++;
+                }
+                else if (c.Alpha < 255)
+                {
+                    changed[i] = new SKColor(c.Red, c.Green, c.Blue, 255);
+                    hardened++;
+                }
+            }
+        }
+
+        dst.Pixels = changed;
+
+        using var image = SKImage.FromBitmap(dst);
+        using var data  = image.Encode(SKEncodedImageFormat.Png, 100);
+        Console.Error.WriteLine($"  Harden: bodyColour=({bodyColour.Red},{bodyColour.Green},{bodyColour.Blue}), {hardened} translucent → 255, {holesFilled} holes filled, {edgesKept} silhouette-edge AA preserved");
+        return data.ToArray();
+    }
+
+    // Drops floating opaque fragments smaller than minArea pixels by setting
+    // their alpha to 0. Used after HardenAlpha to clean up "ghost" BG remnants
+    // that ML segmentation left near the silhouette — those fragments survive
+    // Harden because Harden only fills holes INSIDE the silhouette, not noise
+    // OUTSIDE it. For sprite sheets each character cell is one large component
+    // (usually tens of thousands of pixels); noise blobs are typically a few
+    // hundred to a few thousand pixels, so an absolute pixel threshold cleanly
+    // distinguishes the two.
+    public static byte[] DespeckleAlpha(byte[] pngBytes, int minArea)
+    {
+        if (minArea <= 0) return pngBytes;
+
+        using var inData = SKData.CreateCopy(pngBytes);
+        using var codec = SKCodec.Create(inData) ?? throw new InvalidOperationException("Could not create codec for despeckle.");
+        var info = new SKImageInfo(codec.Info.Width, codec.Info.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using var dst = new SKBitmap(info);
+        var result = codec.GetPixels(info, dst.GetPixels());
+        if (result != SKCodecResult.Success && result != SKCodecResult.IncompleteInput)
+            throw new InvalidOperationException($"PNG decode failed for despeckle: {result}");
+
+        var w = dst.Width;
+        var h = dst.Height;
+        var pixels = dst.Pixels;
+
+        // Label connected components of opaque (alpha > 0) pixels using 4-connectivity.
+        var labels = new int[w * h];          // 0 = unvisited, -1 = transparent, >=1 = component id
+        var areas = new List<int> { 0 };       // areas[componentId]; index 0 unused
+        var queue = new Queue<int>();
+        var nextId = 1;
+
+        for (var i = 0; i < pixels.Length; i++)
+            if (pixels[i].Alpha == 0) labels[i] = -1;
+
+        for (var y = 0; y < h; y++)
+        {
+            for (var x = 0; x < w; x++)
+            {
+                var idx = y * w + x;
+                if (labels[idx] != 0) continue; // -1 (bg) or already labelled
+
+                var id = nextId++;
+                areas.Add(0);
+                labels[idx] = id;
+                queue.Enqueue(idx);
+
+                while (queue.Count > 0)
+                {
+                    var p = queue.Dequeue();
+                    areas[id]++;
+                    var px = p % w;
+                    var py = p / w;
+                    if (px > 0 && labels[p - 1] == 0)     { labels[p - 1] = id; queue.Enqueue(p - 1); }
+                    if (px < w - 1 && labels[p + 1] == 0) { labels[p + 1] = id; queue.Enqueue(p + 1); }
+                    if (py > 0 && labels[p - w] == 0)     { labels[p - w] = id; queue.Enqueue(p - w); }
+                    if (py < h - 1 && labels[p + w] == 0) { labels[p + w] = id; queue.Enqueue(p + w); }
+                }
+            }
+        }
+
+        // Drop any component with area < minArea by setting its pixels' alpha to 0.
+        var dropped = 0;
+        var droppedPixels = 0;
+        var changed = new SKColor[pixels.Length];
+        Array.Copy(pixels, changed, pixels.Length);
+        for (var i = 0; i < pixels.Length; i++)
+        {
+            var lab = labels[i];
+            if (lab > 0 && areas[lab] < minArea)
+            {
+                var c = pixels[i];
+                changed[i] = new SKColor(c.Red, c.Green, c.Blue, 0);
+                droppedPixels++;
+            }
+        }
+        for (var id = 1; id < areas.Count; id++)
+            if (areas[id] < minArea) dropped++;
+
+        dst.Pixels = changed;
+
+        using var image = SKImage.FromBitmap(dst);
+        using var data  = image.Encode(SKEncodedImageFormat.Png, 100);
+        Console.Error.WriteLine($"  Despeckle: {nextId - 1} components found, {dropped} dropped (<{minArea}px), {droppedPixels} pixels cleared");
+        return data.ToArray();
+    }
+
+    // Removes the image background by:
+    //   1. Auto-detecting the dominant edge color (mode of 16-step-binned edge pixels).
+    //   2. Flood-filling from the image border, marking pixels within `tolerance`
+    //      Manhattan distance per channel of that detected colour as transparent.
+    // Works for ANY uniform-ish background colour (white, black, gray, anything).
+    // Interior pixels of the same colour are preserved because the flood stops at
+    // any pixel outside tolerance — typically the character outline.
+    public static byte[] EdgeBackgroundToAlpha(byte[] pngBytes, int tolerance)
     {
         using var src = SKBitmap.Decode(pngBytes);
         if (src is null) throw new InvalidOperationException("Could not decode PNG for alpha conversion.");
 
         var w = src.Width;
         var h = src.Height;
-        var whiteFloor = (byte)Math.Max(0, 255 - tolerance);
 
+        // ── Step 1: detect background colour from edge pixels ─────────────────
+        // Bin each opaque edge pixel into 16-step buckets per channel (4096 bins
+        // total). The most-populated bin's averaged colour is the background.
+        var bins = new Dictionary<int, (int Count, long R, long G, long B)>();
+
+        void AddSample(int x, int y)
+        {
+            var c = src.GetPixel(x, y);
+            if (c.Alpha < 8) return;
+            var key = ((c.Red >> 4) << 8) | ((c.Green >> 4) << 4) | (c.Blue >> 4);
+            if (bins.TryGetValue(key, out var e))
+                bins[key] = (e.Count + 1, e.R + c.Red, e.G + c.Green, e.B + c.Blue);
+            else
+                bins[key] = (1, c.Red, c.Green, c.Blue);
+        }
+
+        for (var x = 0; x < w; x++) { AddSample(x, 0); AddSample(x, h - 1); }
+        for (var y = 1; y < h - 1; y++) { AddSample(0, y); AddSample(w - 1, y); }
+
+        if (bins.Count == 0)
+        {
+            Console.Error.WriteLine("  Alpha: no opaque edge pixels to sample — skipping.");
+            return pngBytes;
+        }
+
+        // Take up to 3 dominant edge-color bins, but only those with at least 15%
+        // of the most-popular bin's count. SD outputs frequently have 2-3 distinct
+        // bg shades (e.g. warm gray near sheet edges + lighter gray in cell interiors
+        // + decorative grass band) that need separate flood seeds.
+        //
+        // Filter out near-white (R,G,B all ≥ 245) and near-black (R,G,B all ≤ 10)
+        // candidates: characters frequently have white or black body parts and
+        // flood-filling from those colours will eat the body via thin outline gaps.
+        // If the actual bg IS pure white or pure black, the SD output is malformed
+        // and we'd rather leave it untouched than corrupt the character.
+        bool IsCharacterColour(int r, int g, int b) =>
+            (r >= 245 && g >= 245 && b >= 245) || (r <= 10 && g <= 10 && b <= 10);
+
+        var topCount = bins.Values.Max(b => b.Count);
+        var dominants = bins.Values
+            .Where(b => b.Count >= topCount * 15 / 100)
+            .Where(b => !IsCharacterColour((int)(b.R / b.Count), (int)(b.G / b.Count), (int)(b.B / b.Count)))
+            .OrderByDescending(b => b.Count)
+            .Take(3)
+            .Select(b => ((byte)(b.R / b.Count), (byte)(b.G / b.Count), (byte)(b.B / b.Count)))
+            .ToList();
+
+        if (dominants.Count == 0)
+        {
+            Console.Error.WriteLine("  Alpha: all dominant edge colours overlap with character (white/black) — skipping to avoid eating body.");
+            return pngBytes;
+        }
+        var manhattanBudget = tolerance * 3;
+
+        // ── Step 2: edge-connected flood fill against each detected bg colour ──
         var info = new SKImageInfo(w, h, SKColorType.Rgba8888, SKAlphaType.Unpremul);
         using var dst = new SKBitmap(info);
         using var canvas = new SKCanvas(dst);
         canvas.DrawBitmap(src, 0, 0);
 
-        var connectedBackground = new bool[w, h];
-        var queue = new Queue<(int X, int Y)>();
+        var visited = new bool[w, h];
 
-        bool IsBackground(int x, int y)
+        foreach (var (bgR, bgG, bgB) in dominants)
         {
-            var c = src.GetPixel(x, y);
-            return c.Alpha < 8 ||
-                   (c.Red >= whiteFloor && c.Green >= whiteFloor && c.Blue >= whiteFloor);
-        }
+            var queue = new Queue<(int X, int Y)>();
 
-        void TryEnqueue(int x, int y)
-        {
-            if (x < 0 || x >= w || y < 0 || y >= h) return;
-            if (connectedBackground[x, y] || !IsBackground(x, y)) return;
+            bool IsBg(int x, int y)
+            {
+                var c = src.GetPixel(x, y);
+                if (c.Alpha < 8) return true;
+                var dr = Math.Abs(c.Red - bgR);
+                var dg = Math.Abs(c.Green - bgG);
+                var db = Math.Abs(c.Blue - bgB);
+                return dr + dg + db <= manhattanBudget;
+            }
 
-            connectedBackground[x, y] = true;
-            queue.Enqueue((x, y));
-        }
+            void TryEnqueue(int x, int y)
+            {
+                if (x < 0 || x >= w || y < 0 || y >= h) return;
+                if (visited[x, y] || !IsBg(x, y)) return;
+                visited[x, y] = true;
+                queue.Enqueue((x, y));
+            }
 
-        for (var x = 0; x < w; x++)
-        {
-            TryEnqueue(x, 0);
-            TryEnqueue(x, h - 1);
-        }
+            for (var x = 0; x < w; x++) { TryEnqueue(x, 0); TryEnqueue(x, h - 1); }
+            for (var y = 0; y < h; y++) { TryEnqueue(0, y); TryEnqueue(w - 1, y); }
 
-        for (var y = 0; y < h; y++)
-        {
-            TryEnqueue(0, y);
-            TryEnqueue(w - 1, y);
-        }
-
-        while (queue.Count > 0)
-        {
-            var (x, y) = queue.Dequeue();
-            TryEnqueue(x - 1, y);
-            TryEnqueue(x + 1, y);
-            TryEnqueue(x, y - 1);
-            TryEnqueue(x, y + 1);
+            while (queue.Count > 0)
+            {
+                var (x, y) = queue.Dequeue();
+                TryEnqueue(x - 1, y);
+                TryEnqueue(x + 1, y);
+                TryEnqueue(x, y - 1);
+                TryEnqueue(x, y + 1);
+            }
         }
 
         var cleared = 0;
@@ -632,7 +966,7 @@ internal static class ComfyUiClient
         {
             for (var x = 0; x < w; x++)
             {
-                if (connectedBackground[x, y])
+                if (visited[x, y])
                 {
                     dst.SetPixel(x, y, SKColors.Transparent);
                     cleared++;
@@ -643,7 +977,8 @@ internal static class ComfyUiClient
         using var image = SKImage.FromBitmap(dst);
         using var data  = image.Encode(SKEncodedImageFormat.Png, 100);
         var totalPixels = w * h;
-        Console.Error.WriteLine($"  Alpha: cleared {cleared}/{totalPixels} pixels ({100 * cleared / totalPixels}%)");
+        var bgList = string.Join(", ", dominants.Select(d => $"({d.Item1},{d.Item2},{d.Item3})"));
+        Console.Error.WriteLine($"  Alpha: detected bgs=[{bgList}] tol={tolerance} → cleared {cleared}/{totalPixels} ({100 * cleared / totalPixels}%)");
         return data.ToArray();
     }
 

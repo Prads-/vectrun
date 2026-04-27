@@ -1,5 +1,71 @@
-using System.Text;
 using System.Text.Json;
+
+// ── Harden alpha: image-generator harden <in> <out> ──────────────────────────
+// Snaps interior body pixels to alpha=255, fills enclosed holes with the
+// median body colour, and preserves silhouette-edge AA. Used to fix
+// ML-segmented PNGs where INSPYRENET / RMBG classified inner body regions
+// as transparent (typical of "holographic" / "glitchy" prompts).
+if (args.Length >= 3 && args[0] == "harden")
+{
+    var inPath = args[1]; var outPath = args[2];
+    if (!File.Exists(inPath)) { Console.Error.WriteLine($"Not found: {inPath}"); return 1; }
+    var bytes = await File.ReadAllBytesAsync(inPath);
+    var hardened = ComfyUiClient.HardenAlpha(bytes);
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+    await File.WriteAllBytesAsync(outPath, hardened);
+    Console.WriteLine($"OK: hardened → {outPath}");
+    return 0;
+}
+
+// ── Pixel probe: image-generator probe <png> ─────────────────────────────────
+if (args.Length >= 2 && args[0] == "probe")
+{
+    var path = args[1];
+    if (!File.Exists(path)) { Console.Error.WriteLine($"Not found: {path}"); return 1; }
+    var bytes = await File.ReadAllBytesAsync(path);
+    using var bmp = SkiaSharp.SKBitmap.Decode(bytes);
+    Console.WriteLine($"{Path.GetFileName(path)} {bmp.Width}x{bmp.Height} {bmp.ColorType} {bmp.AlphaType}");
+    // Histogram alpha values across the whole image
+    var alphaCounts = new int[5]; // [a=0, a<64, a<128, a<255, a==255]
+    for (int y = 0; y < bmp.Height; y++) for (int x = 0; x < bmp.Width; x++) {
+        var a = bmp.GetPixel(x,y).Alpha;
+        if (a == 0) alphaCounts[0]++;
+        else if (a < 64) alphaCounts[1]++;
+        else if (a < 128) alphaCounts[2]++;
+        else if (a < 255) alphaCounts[3]++;
+        else alphaCounts[4]++;
+    }
+    var total = bmp.Width * bmp.Height;
+    Console.WriteLine($"  alpha: a=0:{alphaCounts[0]*100/total}% a<64:{alphaCounts[1]*100/total}% a<128:{alphaCounts[2]*100/total}% a<255:{alphaCounts[3]*100/total}% a=255:{alphaCounts[4]*100/total}%");
+    // Sample a few opaque pixels
+    int found = 0;
+    for (int y = 0; y < bmp.Height && found < 5; y += 100) for (int x = 0; x < bmp.Width && found < 5; x += 100) {
+        var c = bmp.GetPixel(x,y);
+        if (c.Alpha > 200) {
+            Console.WriteLine($"  OPAQUE@({x},{y}) RGBA=({c.Red},{c.Green},{c.Blue},{c.Alpha})");
+            found++;
+        }
+    }
+    return 0;
+}
+
+// ── Standalone alpha mode: image-generator alpha <in> <out> [tolerance] ───────
+// Applies the same edge-connected background-removal that the presets use, on an
+// existing PNG. No ComfyUI required. Used for re-keying broken sheets and for
+// testing the alpha algorithm without re-running generation.
+if (args.Length >= 3 && args[0] == "alpha")
+{
+    var inPath  = args[1];
+    var outPath = args[2];
+    var tol     = args.Length >= 4 && int.TryParse(args[3], out var t) ? t : 40;
+    if (!File.Exists(inPath)) { Console.Error.WriteLine($"Input not found: {inPath}"); return 1; }
+    var inBytes  = await File.ReadAllBytesAsync(inPath);
+    var outBytes = ComfyUiClient.EdgeBackgroundToAlpha(inBytes, tol);
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+    await File.WriteAllBytesAsync(outPath, outBytes);
+    Console.WriteLine($"OK: wrote {outPath} ({outBytes.Length} bytes)");
+    return 0;
+}
 
 // ── Parse stdin or file arg ───────────────────────────────────────────────────
 
@@ -13,7 +79,7 @@ if (string.IsNullOrWhiteSpace(stdin))
     Console.Error.WriteLine("       echo '<json>' | image-generator");
     Console.Error.WriteLine("");
     Console.Error.WriteLine("Preset (recommended for game assets):");
-    Console.Error.WriteLine("  { \"preset\": \"character_pixel|character_cartoon|env_sprite_pixel|env_sprite_cartoon|background_pixel|background_cartoon|background_topdown_pixel|background_topdown_cartoon|ui_pixel|ui_cartoon\",");
+    Console.Error.WriteLine("  { \"preset\": \"character_pixel|character_cartoon|character_static_pixel|character_static_cartoon|env_sprite_pixel|env_sprite_cartoon|background_pixel|background_cartoon|background_topdown_pixel|background_topdown_cartoon|ui_pixel|ui_cartoon\",");
     Console.Error.WriteLine("    \"prompt\": \"<designer description>\", \"outputPath\": \"...\", [seed, negativePrompt] }");
     Console.Error.WriteLine("  Preset hard-overrides checkpoint/lora/sampler/steps/cfg/etc; only seed and negativePrompt are user-overridable.");
     Console.Error.WriteLine("");
@@ -219,6 +285,9 @@ static ImageParams MergeParams(JsonElement defaults, JsonElement item)
         TrimTolerance: Get("trimTolerance", 10, e => e.GetInt32()),
         AlphaFromWhite: Get("alphaFromWhite", false, e => e.GetBoolean()),
         AlphaThreshold: Get("alphaThreshold", 15, e => e.GetInt32()),
+        RemoveBackground: Get("removeBackground", false, e => e.GetBoolean()),
+        BgRemovalModel: Get("bgRemovalModel", "INSPYRENET", e => e.GetString() ?? "INSPYRENET"),
+        DespeckleAlpha: Get("despeckleAlpha", 0, e => e.GetInt32()),
         Preset: Get("preset", "", e => e.GetString() ?? ""),
         Perspective: Get("perspective", "", e => e.GetString() ?? "")
     );
@@ -381,6 +450,9 @@ record ImageParams(
     int TrimTolerance,
     bool AlphaFromWhite,
     int AlphaThreshold,
+    bool RemoveBackground,
+    string BgRemovalModel,
+    int DespeckleAlpha,
     string Preset,
     string Perspective
 );
